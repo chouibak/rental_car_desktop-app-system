@@ -1,0 +1,74 @@
+{
+  "name": "rental-car-crm",
+  "version": "1.0.1",
+  "description": "CRM de location de voitures — application bureau",
+  "main": "dist-electron/main.js",
+  "author": "RentalCar CRM",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "start": "npm run build && electron .",
+    "build": "tsc -p tsconfig.node.json --noEmit && vite build",
+    "preview": "vite preview",
+    "dist": "npm run build && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.rentalcar.crm",
+    "productName": "RentalCar CRM",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "build/icon.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "RentalCar CRM",
+      "uninstallDisplayName": "RentalCar CRM",
+      "artifactName": "RentalCarCRM-Setup-${version}.exe"
+    }
+  },
+  "dependencies": {
+    "pdfkit": "^0.19.1",
+    "sql.js": "^1.12.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/pdfkit": "^0.17.6",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/sql.js": "^1.4.9",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^3.0.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.1",
+    "sharp": "^0.35.3",
+    "to-ico": "^1.1.5",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11",
+    "vite-plugin-electron": "^0.28.8",
+    "vite-plugin-electron-renderer": "^0.14.6"
+  }
+}

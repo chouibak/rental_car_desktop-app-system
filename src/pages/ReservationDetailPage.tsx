@@ -1,0 +1,226 @@
+import { useEffect, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { IconEdit, IconFile, IconTrash } from '../components/icons'
+import { ReservationPaymentsPanel } from '../components/ReservationPaymentsPanel'
+import { PageHeader, PaymentBadge, StatusBadge } from '../components/ui'
+import { useLang } from '../context/LangContext'
+import type { Contract, Reservation } from '../types'
+import { deliveryLocationLabel } from '../utils/reservation'
+
+function formatDatetime(value: string) {
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+function display(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'string' && !value.trim()) return '—'
+  return String(value)
+}
+
+export default function ReservationDetailPage() {
+  const { id } = useParams()
+  const navigate = useNavigate()
+  const { t, money } = useLang()
+  const [reservation, setReservation] = useState<Reservation | null>(null)
+  const [linkedContracts, setLinkedContracts] = useState<Contract[]>([])
+
+  useEffect(() => {
+    if (!id) return
+    const reservationId = Number(id)
+
+    window.api.getReservation(reservationId).then((data) => {
+      if (!data) {
+        navigate('/reservations')
+        return
+      }
+      setReservation(data)
+    })
+
+    window.api.listContracts().then((contracts) => {
+      setLinkedContracts(contracts.filter((contract) => Number(contract.reservation_id) === reservationId))
+    })
+  }, [id, navigate])
+
+  const onCreateContract = () => {
+    if (!reservation || linkedContracts.length > 0) return
+    navigate(`/contracts/new?reservation=${reservation.id}`)
+  }
+
+  const onDelete = async () => {
+    if (!reservation || !confirm(t.confirmDelete)) return
+    try {
+      await window.api.deleteReservation(reservation.id)
+      navigate('/reservations')
+    } catch {
+      alert(t.cannotDeleteReservation)
+    }
+  }
+
+  if (!reservation) return <div className="empty">{t.loading}</div>
+
+  const paid = reservation.paid_amount ?? 0
+  const paymentStatus =
+    reservation.total_amount > 0 && paid >= reservation.total_amount
+      ? 'paid'
+      : paid > 0
+        ? 'partial'
+        : reservation.payment_status
+
+  const infoItems = [
+    {
+      label: t.customer,
+      value: reservation.customer_name ? (
+        <Link className="link-btn" to={`/customers/${reservation.customer_id}`}>
+          {reservation.customer_name}
+        </Link>
+      ) : (
+        '—'
+      ),
+    },
+    {
+      label: t.chauffeur,
+      value: reservation.chauffeur_name ? (
+        reservation.chauffeur_id ? (
+          <Link className="link-btn" to={`/chauffeurs/${reservation.chauffeur_id}`}>
+            {reservation.chauffeur_name}
+          </Link>
+        ) : (
+          reservation.chauffeur_name
+        )
+      ) : (
+        t.noChauffeur
+      ),
+    },
+    {
+      label: t.car,
+      value: reservation.car_name ? (
+        <Link className="link-btn" to={`/cars/${reservation.car_id}`}>
+          {reservation.car_name}
+          {reservation.car_plate ? ` (${reservation.car_plate})` : ''}
+        </Link>
+      ) : (
+        '—'
+      ),
+    },
+    { label: t.pickupDate, value: formatDatetime(reservation.pickup_date) },
+    { label: t.returnDateTime, value: formatDatetime(reservation.return_date) },
+    { label: t.days, value: display(reservation.days) },
+    { label: t.dailyPrice, value: money(reservation.daily_rate) },
+    { label: t.total, value: money(reservation.total_amount) },
+    { label: t.deposit, value: money(reservation.deposit_amount) },
+    { label: t.depositStatus, value: t[reservation.deposit_status] },
+    { label: t.deliveryLocation, value: deliveryLocationLabel(reservation.delivery_location, t) },
+  ]
+
+  return (
+    <div>
+      <PageHeader
+        title={reservation.reference}
+        subtitle={[reservation.customer_name, reservation.car_plate].filter(Boolean).join(' · ') || undefined}
+      >
+        <Link className="btn secondary sm" to="/reservations">
+          {t.back}
+        </Link>
+        <Link className="btn sm" to={`/reservations/${reservation.id}/edit`}>
+          <IconEdit size={15} />
+          {t.edit}
+        </Link>
+        <button className="btn danger sm" onClick={onDelete}>
+          <IconTrash size={15} />
+          {t.delete}
+        </button>
+      </PageHeader>
+
+      <div className="panel contract-action-panel">
+        <div className="panel-header">
+          <div className="panel-header-title">
+            <IconFile size={18} />
+            <h3>{t.contractForReservation}</h3>
+          </div>
+        </div>
+        <div className="panel-body contract-action-body">
+          {linkedContracts.length > 0 ? (
+            <div className="contract-action-existing">
+              {linkedContracts.length > 1 ? (
+                <p className="contract-duplicate-reservation">{t.duplicateReservationWarning}</p>
+              ) : null}
+              <div className="linked-contracts-list">
+                {linkedContracts.map((contract) => (
+                  <div className="linked-contract-row" key={contract.id}>
+                    <div>
+                      <strong>{contract.contract_number}</strong>
+                      <p className="muted-text">
+                        {contract.client_name} · {money(contract.total_amount)}
+                        {' · '}
+                        <StatusBadge status={contract.status === 'completed' ? 'closed' : contract.status} />
+                      </p>
+                    </div>
+                    <div className="contract-action-buttons">
+                      <Link className="btn" to={`/contracts/${contract.id}`}>
+                        {t.viewContract}
+                      </Link>
+                      <Link className="btn secondary" to={`/contracts/${contract.id}/edit`}>
+                        {t.editContractAction}
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : reservation.status === 'cancelled' ? (
+            <p className="muted-text">{t.contractCancelledHint}</p>
+          ) : (
+            <div className="contract-action-create">
+              <div>
+                <strong>{t.noContractYet}</strong>
+                <p className="muted-text">{t.contractForReservationHint}</p>
+              </div>
+              <button className="btn" onClick={onCreateContract}>
+                {t.createContractFromReservation}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-header">
+          <h3>{t.details}</h3>
+          <div className="row-actions">
+            <StatusBadge status={reservation.status} />
+            <PaymentBadge status={paymentStatus} />
+          </div>
+        </div>
+        <div className="panel-body">
+          <div className="info-grid">
+            {infoItems.map((item) => (
+              <div className="info-item" key={item.label}>
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {reservation.message?.trim() && (
+          <>
+            <div className="panel-header panel-header-divider">
+              <h3>{t.message}</h3>
+            </div>
+            <div className="panel-body detail-notes">
+              <p>{reservation.message}</p>
+            </div>
+          </>
+        )}
+      </div>
+
+      <ReservationPaymentsPanel
+        reservationId={reservation.id}
+        reservation={reservation}
+        onReservationChange={setReservation}
+      />
+    </div>
+  )
+}

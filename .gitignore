@@ -1,0 +1,7 @@
+node_modules
+dist
+dist-electron
+release/*
+!release/RentalCarCRM-Setup-*.exe
+*.log
+.DS_Store

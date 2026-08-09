@@ -1,0 +1,1047 @@
+import type { Database } from 'sql.js'
+import { driverSnapshotFromChauffeur } from './chauffeurs-db'
+
+export type ContractStatus = 'draft' | 'active' | 'closed' | 'cancelled'
+
+export type ContractDamage = {
+  part: string
+  type: string
+  note: string
+  photo?: string
+}
+
+export type ContractRecord = {
+  id: number
+  contract_number: string
+  reservation_id: number | null
+  client_id: number | null
+  car_id: number | null
+  status: ContractStatus
+  deleted_at: string | null
+  contract_date: string
+  contract_city: string
+  driver1_name: string
+  driver1_birth_date: string
+  driver1_birth_place: string
+  driver1_nationality: string
+  driver1_address: string
+  driver1_phone: string
+  driver1_passport_number: string
+  driver1_passport_issued_at: string
+  driver1_passport_expires_at: string
+  driver1_cin_number: string
+  driver1_cin_issued_at: string
+  driver1_cin_expires_at: string
+  driver1_license_number: string
+  driver1_license_issued_at: string
+  driver1_license_expires_at: string
+  driver2_name: string
+  driver2_birth_date: string
+  driver2_birth_place: string
+  driver2_nationality: string
+  driver2_address: string
+  driver2_phone: string
+  driver2_passport_number: string
+  driver2_passport_issued_at: string
+  driver2_passport_expires_at: string
+  driver2_cin_number: string
+  driver2_cin_issued_at: string
+  driver2_cin_expires_at: string
+  driver2_license_number: string
+  driver2_license_issued_at: string
+  driver2_license_expires_at: string
+  vehicle_brand: string
+  vehicle_model: string
+  vehicle_plate: string
+  departure_at: string
+  departure_place: string
+  departure_mileage: number
+  departure_fuel_level: string
+  return_at: string
+  return_place: string
+  return_mileage: number
+  return_fuel_level: string
+  billed_days: number
+  extension_until: string
+  extension_days: number
+  departure_notes: string
+  return_notes: string
+  equipment: string
+  equipment_other: string
+  departure_damages: string
+  return_damages: string
+  include_damage_photos_in_pdf: number
+  daily_rate: number
+  total_amount: number
+  deposit_amount: number
+  franchise_applies: number
+  franchise_amount: number
+  extra_charges: number
+  extra_charges_note: string
+  vat_applies: number
+  vat_rate: number
+  discount: number
+  delivered_at: string
+  closed_at: string
+  customer_signed_at: string
+  agency_signed_at: string
+  notes: string
+  created_at: string
+  updated_at: string
+  start_date: string
+  end_date: string
+  daily_price: number
+  total_days: number
+  deposit: number
+}
+
+export type ContractListItem = ContractRecord & {
+  client_name: string
+  client_phone: string
+  brand: string
+  model: string
+  plate_number: string
+  reservation_reference?: string
+  paid_amount?: number
+  is_overdue?: boolean
+}
+
+export type ContractInput = Partial<Omit<ContractRecord, 'id' | 'created_at' | 'updated_at' | 'contract_number'>>
+
+export type ContractFilters = {
+  q?: string
+  status?: ContractStatus | ''
+  car_id?: number | ''
+  client_id?: number | ''
+  overdue?: boolean
+  archived?: boolean
+}
+
+export type CloseContractInput = {
+  return_at?: string
+  return_mileage?: number
+  return_fuel_level?: string
+  return_notes?: string
+  return_damages?: ContractDamage[]
+  extra_charges?: number
+  return_extra_fees?: number
+  extra_charges_note?: string
+}
+
+type DbHelpers = {
+  queryAll: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => T[]
+  queryOne: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => T | null
+  run: (sql: string, params?: unknown[]) => void
+  runInsert: (sql: string, params?: unknown[]) => number
+  lastId: () => number
+  now: () => string
+}
+
+type CarsApi = {
+  isCarRentable: (id: number, start: string, end: string) => boolean
+  getCar: (id: number) => {
+    brand: string
+    model: string
+    plate_number: string
+    mileage: number
+    fuel_level: string
+    condition_notes: string
+    price_per_day: number
+  } | null
+}
+
+export const DEFAULT_EQUIPMENT = [
+  'radio',
+  'spare_wheel',
+  'jack',
+  'documents',
+  'vest',
+  'extinguisher',
+  'warning_triangle',
+] as const
+
+export const CONTRACT_STATUSES: ContractStatus[] = ['draft', 'active', 'closed', 'cancelled']
+
+const MIGRATION_COLUMNS: Array<[string, string]> = [
+  ['reservation_id', 'INTEGER'],
+  ['contract_date', 'TEXT'],
+  ['contract_city', 'TEXT'],
+  ['driver1_name', 'TEXT'],
+  ['driver1_birth_date', 'TEXT'],
+  ['driver1_birth_place', 'TEXT'],
+  ['driver1_nationality', 'TEXT'],
+  ['driver1_address', 'TEXT'],
+  ['driver1_phone', 'TEXT'],
+  ['driver1_passport_number', 'TEXT'],
+  ['driver1_passport_issued_at', 'TEXT'],
+  ['driver1_passport_expires_at', 'TEXT'],
+  ['driver1_cin_number', 'TEXT'],
+  ['driver1_cin_issued_at', 'TEXT'],
+  ['driver1_cin_expires_at', 'TEXT'],
+  ['driver1_license_number', 'TEXT'],
+  ['driver1_license_issued_at', 'TEXT'],
+  ['driver1_license_expires_at', 'TEXT'],
+  ['driver2_name', 'TEXT'],
+  ['driver2_birth_date', 'TEXT'],
+  ['driver2_birth_place', 'TEXT'],
+  ['driver2_nationality', 'TEXT'],
+  ['driver2_address', 'TEXT'],
+  ['driver2_phone', 'TEXT'],
+  ['driver2_passport_number', 'TEXT'],
+  ['driver2_passport_issued_at', 'TEXT'],
+  ['driver2_passport_expires_at', 'TEXT'],
+  ['driver2_cin_number', 'TEXT'],
+  ['driver2_cin_issued_at', 'TEXT'],
+  ['driver2_cin_expires_at', 'TEXT'],
+  ['driver2_license_number', 'TEXT'],
+  ['driver2_license_issued_at', 'TEXT'],
+  ['driver2_license_expires_at', 'TEXT'],
+  ['vehicle_brand', 'TEXT'],
+  ['vehicle_model', 'TEXT'],
+  ['vehicle_plate', 'TEXT'],
+  ['departure_at', 'TEXT'],
+  ['departure_place', 'TEXT'],
+  ['departure_mileage', 'INTEGER DEFAULT 0'],
+  ['departure_fuel_level', 'TEXT'],
+  ['return_at', 'TEXT'],
+  ['return_place', 'TEXT'],
+  ['return_mileage', 'INTEGER DEFAULT 0'],
+  ['return_fuel_level', 'TEXT'],
+  ['billed_days', 'INTEGER DEFAULT 0'],
+  ['extension_until', 'TEXT'],
+  ['extension_days', 'INTEGER DEFAULT 0'],
+  ['departure_notes', 'TEXT'],
+  ['return_notes', 'TEXT'],
+  ['equipment', 'TEXT'],
+  ['equipment_other', 'TEXT'],
+  ['departure_damages', 'TEXT'],
+  ['return_damages', 'TEXT'],
+  ['include_damage_photos_in_pdf', 'INTEGER DEFAULT 1'],
+  ['daily_rate', 'REAL DEFAULT 0'],
+  ['deposit_amount', 'REAL DEFAULT 0'],
+  ['franchise_applies', 'INTEGER DEFAULT 0'],
+  ['franchise_amount', 'REAL DEFAULT 0'],
+  ['extra_charges', 'REAL DEFAULT 0'],
+  ['extra_charges_note', 'TEXT'],
+  ['vat_applies', 'INTEGER DEFAULT 1'],
+  ['vat_rate', 'REAL DEFAULT 20'],
+  ['delivered_at', 'TEXT'],
+  ['closed_at', 'TEXT'],
+  ['customer_signed_at', 'TEXT'],
+  ['agency_signed_at', 'TEXT'],
+  ['deleted_at', 'TEXT'],
+]
+
+export function migrateContractsTable(db: Database, helpers: DbHelpers) {
+  const columns = helpers.queryAll<{ name: string }>('PRAGMA table_info(contracts)')
+  const names = new Set(columns.map((c) => c.name))
+
+  for (const [col, type] of MIGRATION_COLUMNS) {
+    if (!names.has(col)) {
+      db.run(`ALTER TABLE contracts ADD COLUMN ${col} ${type}`)
+    }
+  }
+
+  helpers.run(`
+    UPDATE contracts SET
+      departure_at = COALESCE(NULLIF(departure_at, ''), start_date),
+      return_at = COALESCE(NULLIF(return_at, ''), end_date),
+      billed_days = CASE WHEN billed_days IS NULL OR billed_days = 0 THEN total_days ELSE billed_days END,
+      daily_rate = CASE WHEN daily_rate IS NULL OR daily_rate = 0 THEN daily_price ELSE daily_rate END,
+      deposit_amount = CASE WHEN deposit_amount IS NULL OR deposit_amount = 0 THEN deposit ELSE deposit_amount END,
+      contract_date = COALESCE(NULLIF(contract_date, ''), date(start_date)),
+      driver1_name = COALESCE(NULLIF(driver1_name, ''), '')
+  `)
+
+  helpers.run(`UPDATE contracts SET status = 'closed' WHERE status = 'completed'`)
+}
+
+function parseJsonArray<T>(value: unknown, fallback: T[] = []): T[] {
+  if (Array.isArray(value)) return value as T[]
+  if (typeof value !== 'string' || !value.trim()) return fallback
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function datePart(value: string) {
+  return value?.slice(0, 10) ?? ''
+}
+
+function calcDays(start: string, end: string) {
+  const a = new Date(start)
+  const b = new Date(end)
+  if (Number.isNaN(a.getTime()) || Number.isNaN(b.getTime()) || b <= a) return 1
+  return Math.max(1, Math.ceil((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24)))
+}
+
+function normalizeStatus(status?: string): ContractStatus {
+  if (status === 'completed') return 'closed'
+  if (CONTRACT_STATUSES.includes(status as ContractStatus)) return status as ContractStatus
+  return 'draft'
+}
+
+function nextNumber(helpers: DbHelpers) {
+  const year = new Date().getFullYear()
+  const row = helpers.queryOne<{ c: number }>(
+    `SELECT COUNT(*) as c FROM contracts WHERE contract_number LIKE ?`,
+    [`CTR-${year}-%`],
+  )
+  return `CTR-${year}-${String((row?.c ?? 0) + 1).padStart(4, '0')}`
+}
+
+function driverSnapshotFromCustomer(customer: Record<string, string>) {
+  return {
+    driver1_name: customer.name ?? '',
+    driver1_birth_date: customer.birth_date ?? '',
+    driver1_birth_place: customer.birth_place ?? '',
+    driver1_nationality: customer.nationality ?? '',
+    driver1_address: customer.address ?? '',
+    driver1_phone: customer.phone ?? '',
+    driver1_passport_number: customer.passport_number ?? '',
+    driver1_passport_issued_at: customer.passport_issue_date ?? '',
+    driver1_passport_expires_at: customer.passport_expiry_date ?? '',
+    driver1_cin_number: customer.cin_number ?? '',
+    driver1_cin_issued_at: customer.cin_issue_date ?? '',
+    driver1_cin_expires_at: customer.cin_expiry_date ?? '',
+    driver1_license_number: customer.license_number ?? '',
+    driver1_license_issued_at: customer.license_issue_date ?? '',
+    driver1_license_expires_at: customer.license_expiry_date ?? '',
+  }
+}
+
+function normalizeInput(data: ContractInput, existing?: ContractRecord) {
+  const departure_at = data.departure_at ?? existing?.departure_at ?? existing?.start_date ?? ''
+  const return_at = data.return_at ?? existing?.return_at ?? existing?.end_date ?? ''
+  const daily_rate = Number(data.daily_rate ?? data.daily_price ?? existing?.daily_rate ?? existing?.daily_price ?? 0)
+  const billed_days = Number(
+    data.billed_days ?? data.total_days ?? (departure_at && return_at ? calcDays(departure_at, return_at) : existing?.billed_days ?? 1),
+  )
+  const discount = Number(data.discount ?? existing?.discount ?? 0)
+  const extra_charges = Number(data.extra_charges ?? existing?.extra_charges ?? 0)
+  const total_amount = Number(
+    data.total_amount ?? Math.max(0, billed_days * daily_rate - discount + extra_charges),
+  )
+
+  const equipment = data.equipment
+    ? JSON.stringify(parseJsonArray<string>(data.equipment))
+    : existing?.equipment ?? JSON.stringify([...DEFAULT_EQUIPMENT])
+
+  const departure_damages = data.departure_damages
+    ? JSON.stringify(parseJsonArray<ContractDamage>(data.departure_damages))
+    : existing?.departure_damages ?? '[]'
+
+  const return_damages = data.return_damages
+    ? JSON.stringify(parseJsonArray<ContractDamage>(data.return_damages))
+    : existing?.return_damages ?? '[]'
+
+  const driver1_name = (data.driver1_name ?? existing?.driver1_name ?? '').trim()
+  if (!driver1_name) throw new Error('DRIVER1_REQUIRED')
+
+  const franchise_amount = Number(data.franchise_amount ?? existing?.franchise_amount ?? 0)
+  const franchise_applies =
+    data.franchise_applies !== undefined
+      ? Number(data.franchise_applies) ? 1 : 0
+      : franchise_amount > 0
+        ? 1
+        : Number(existing?.franchise_applies ?? 0)
+
+  return {
+    reservation_id: data.reservation_id ?? existing?.reservation_id ?? null,
+    client_id: Number(data.client_id ?? existing?.client_id ?? 0) || null,
+    car_id: Number(data.car_id ?? existing?.car_id ?? 0) || null,
+    status: normalizeStatus(data.status ?? existing?.status),
+    contract_date: data.contract_date ?? existing?.contract_date ?? new Date().toISOString().slice(0, 10),
+    contract_city: data.contract_city ?? existing?.contract_city ?? '',
+    driver1_name,
+    driver1_birth_date: data.driver1_birth_date ?? existing?.driver1_birth_date ?? '',
+    driver1_birth_place: data.driver1_birth_place ?? existing?.driver1_birth_place ?? '',
+    driver1_nationality: data.driver1_nationality ?? existing?.driver1_nationality ?? '',
+    driver1_address: data.driver1_address ?? existing?.driver1_address ?? '',
+    driver1_phone: data.driver1_phone ?? existing?.driver1_phone ?? '',
+    driver1_passport_number: data.driver1_passport_number ?? existing?.driver1_passport_number ?? '',
+    driver1_passport_issued_at: data.driver1_passport_issued_at ?? existing?.driver1_passport_issued_at ?? '',
+    driver1_passport_expires_at: data.driver1_passport_expires_at ?? existing?.driver1_passport_expires_at ?? '',
+    driver1_cin_number: data.driver1_cin_number ?? existing?.driver1_cin_number ?? '',
+    driver1_cin_issued_at: data.driver1_cin_issued_at ?? existing?.driver1_cin_issued_at ?? '',
+    driver1_cin_expires_at: data.driver1_cin_expires_at ?? existing?.driver1_cin_expires_at ?? '',
+    driver1_license_number: data.driver1_license_number ?? existing?.driver1_license_number ?? '',
+    driver1_license_issued_at: data.driver1_license_issued_at ?? existing?.driver1_license_issued_at ?? '',
+    driver1_license_expires_at: data.driver1_license_expires_at ?? existing?.driver1_license_expires_at ?? '',
+    driver2_name: data.driver2_name ?? existing?.driver2_name ?? '',
+    driver2_birth_date: data.driver2_birth_date ?? existing?.driver2_birth_date ?? '',
+    driver2_birth_place: data.driver2_birth_place ?? existing?.driver2_birth_place ?? '',
+    driver2_nationality: data.driver2_nationality ?? existing?.driver2_nationality ?? '',
+    driver2_address: data.driver2_address ?? existing?.driver2_address ?? '',
+    driver2_phone: data.driver2_phone ?? existing?.driver2_phone ?? '',
+    driver2_passport_number: data.driver2_passport_number ?? existing?.driver2_passport_number ?? '',
+    driver2_passport_issued_at: data.driver2_passport_issued_at ?? existing?.driver2_passport_issued_at ?? '',
+    driver2_passport_expires_at: data.driver2_passport_expires_at ?? existing?.driver2_passport_expires_at ?? '',
+    driver2_cin_number: data.driver2_cin_number ?? existing?.driver2_cin_number ?? '',
+    driver2_cin_issued_at: data.driver2_cin_issued_at ?? existing?.driver2_cin_issued_at ?? '',
+    driver2_cin_expires_at: data.driver2_cin_expires_at ?? existing?.driver2_cin_expires_at ?? '',
+    driver2_license_number: data.driver2_license_number ?? existing?.driver2_license_number ?? '',
+    driver2_license_issued_at: data.driver2_license_issued_at ?? existing?.driver2_license_issued_at ?? '',
+    driver2_license_expires_at: data.driver2_license_expires_at ?? existing?.driver2_license_expires_at ?? '',
+    vehicle_brand: data.vehicle_brand ?? existing?.vehicle_brand ?? '',
+    vehicle_model: data.vehicle_model ?? existing?.vehicle_model ?? '',
+    vehicle_plate: data.vehicle_plate ?? existing?.vehicle_plate ?? '',
+    departure_at,
+    departure_place: data.departure_place ?? existing?.departure_place ?? '',
+    departure_mileage: Number(data.departure_mileage ?? existing?.departure_mileage ?? 0),
+    departure_fuel_level: data.departure_fuel_level ?? existing?.departure_fuel_level ?? '',
+    return_at,
+    return_place: data.return_place ?? existing?.return_place ?? '',
+    return_mileage: Number(data.return_mileage ?? existing?.return_mileage ?? 0),
+    return_fuel_level: data.return_fuel_level ?? existing?.return_fuel_level ?? '',
+    billed_days,
+    extension_until: data.extension_until ?? existing?.extension_until ?? '',
+    extension_days: Number(data.extension_days ?? existing?.extension_days ?? 0),
+    departure_notes: data.departure_notes ?? existing?.departure_notes ?? '',
+    return_notes: data.return_notes ?? existing?.return_notes ?? '',
+    equipment,
+    equipment_other: data.equipment_other ?? existing?.equipment_other ?? '',
+    departure_damages,
+    return_damages,
+    include_damage_photos_in_pdf: data.include_damage_photos_in_pdf ?? existing?.include_damage_photos_in_pdf ?? 1,
+    daily_rate,
+    total_amount,
+    deposit_amount: Number(data.deposit_amount ?? data.deposit ?? existing?.deposit_amount ?? existing?.deposit ?? 0),
+    franchise_applies,
+    franchise_amount,
+    extra_charges,
+    extra_charges_note: data.extra_charges_note ?? existing?.extra_charges_note ?? '',
+    vat_applies: data.vat_applies ?? existing?.vat_applies ?? 1,
+    vat_rate: Number(data.vat_rate ?? existing?.vat_rate ?? 20),
+    discount,
+    delivered_at: data.delivered_at ?? existing?.delivered_at ?? '',
+    closed_at: data.closed_at ?? existing?.closed_at ?? '',
+    customer_signed_at: data.customer_signed_at ?? existing?.customer_signed_at ?? '',
+    agency_signed_at: data.agency_signed_at ?? existing?.agency_signed_at ?? '',
+    notes: data.notes ?? existing?.notes ?? '',
+    start_date: datePart(departure_at),
+    end_date: datePart(return_at),
+    daily_price: daily_rate,
+    total_days: billed_days,
+    deposit: Number(data.deposit_amount ?? data.deposit ?? existing?.deposit_amount ?? existing?.deposit ?? 0),
+  }
+}
+
+function mapListRow(row: ContractListItem): ContractListItem {
+  const now = new Date()
+  const returnAt = new Date(row.return_at || row.end_date)
+  return {
+    ...row,
+    status: normalizeStatus(row.status),
+    is_overdue: row.status === 'active' && !Number.isNaN(returnAt.getTime()) && returnAt < now,
+  }
+}
+
+function assertClientAndCarExist(helpers: DbHelpers, clientId: number | null, carId: number | null) {
+  if (!clientId) throw new Error('CLIENT_AND_CAR_REQUIRED')
+  if (!carId) throw new Error('CLIENT_AND_CAR_REQUIRED')
+
+  const customer = helpers.queryOne('SELECT id FROM customers WHERE id = ?', [clientId])
+  if (!customer) throw new Error('CLIENT_NOT_FOUND')
+
+  const car = helpers.queryOne('SELECT id FROM cars WHERE id = ?', [carId])
+  if (!car) throw new Error('CAR_NOT_FOUND')
+}
+
+/** When linked to a reservation, client and car must match that reservation. */
+function assertLinkedReservationConsistency(
+  helpers: DbHelpers,
+  reservationId: number | null,
+  clientId: number | null,
+  carId: number | null,
+) {
+  if (!reservationId) return
+
+  const reservation = helpers.queryOne<{ customer_id: number; car_id: number }>(
+    'SELECT customer_id, car_id FROM reservations WHERE id = ?',
+    [reservationId],
+  )
+  if (!reservation) throw new Error('RESERVATION_NOT_FOUND')
+
+  if (clientId && Number(reservation.customer_id) !== Number(clientId)) {
+    throw new Error('CONTRACT_RESERVATION_CLIENT_MISMATCH')
+  }
+  if (carId && Number(reservation.car_id) !== Number(carId)) {
+    throw new Error('CONTRACT_RESERVATION_CAR_MISMATCH')
+  }
+}
+
+const PAID_AMOUNT_EXPR = `
+  (
+    (SELECT COALESCE(SUM(amount), 0) FROM payments p WHERE p.contract_id = c.id)
+    + CASE WHEN c.reservation_id IS NOT NULL THEN COALESCE((
+        SELECT SUM(amount) FROM reservation_payments rp
+        WHERE rp.reservation_id = c.reservation_id AND rp.type = 'rental' AND rp.status = 'completed'
+      ), 0) ELSE 0 END
+  )`
+
+export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSettings: () => Record<string, string>) {
+  const listSql = `
+    SELECT c.*,
+      cu.name as client_name,
+      cu.phone as client_phone,
+      ca.brand, ca.model, ca.plate_number,
+      r.reference as reservation_reference,
+      ${PAID_AMOUNT_EXPR} as paid_amount
+    FROM contracts c
+    LEFT JOIN customers cu ON cu.id = c.client_id
+    LEFT JOIN cars ca ON ca.id = c.car_id
+    LEFT JOIN reservations r ON r.id = c.reservation_id
+  `
+
+  return {
+    listContracts(filters?: ContractFilters) {
+      let sql = `${listSql} WHERE 1=1`
+      const params: unknown[] = []
+
+      if (filters?.archived) {
+        sql += ' AND c.deleted_at IS NOT NULL'
+      } else {
+        sql += ' AND c.deleted_at IS NULL'
+      }
+
+      if (filters?.status) {
+        sql += ' AND c.status = ?'
+        params.push(filters.status)
+      }
+      if (filters?.car_id) {
+        sql += ' AND c.car_id = ?'
+        params.push(filters.car_id)
+      }
+      if (filters?.client_id) {
+        sql += ' AND c.client_id = ?'
+        params.push(filters.client_id)
+      }
+      if (filters?.q) {
+        sql += ' AND (c.contract_number LIKE ? OR cu.name LIKE ? OR ca.plate_number LIKE ? OR c.vehicle_plate LIKE ?)'
+        const like = `%${filters.q}%`
+        params.push(like, like, like, like)
+      }
+      if (filters?.overdue) {
+        sql += ` AND c.status = 'active' AND datetime(COALESCE(NULLIF(c.return_at,''), c.end_date)) < datetime('now')`
+      }
+
+      sql += ' ORDER BY c.id DESC'
+      return helpers.queryAll<ContractListItem>(sql, params).map(mapListRow)
+    },
+
+    getContract(id: number) {
+      const contract = helpers.queryOne<ContractListItem>(`${listSql} WHERE c.id = ?`, [id])
+      if (!contract) return null
+
+      const contractPayments = helpers.queryAll<{
+        id: number
+        contract_id: number
+        amount: number
+        method: string
+        paid_at: string
+        note: string
+      }>('SELECT * FROM payments WHERE contract_id = ? ORDER BY paid_at DESC, id DESC', [id])
+
+      const reservationPayments = contract.reservation_id
+        ? helpers.queryAll<{
+            id: number
+            amount: number
+            method: string
+            paid_at: string
+            notes: string
+            reference: string
+          }>(
+            `SELECT id, amount, method, paid_at, notes, reference
+             FROM reservation_payments
+             WHERE reservation_id = ? AND type = 'rental' AND status = 'completed'
+             ORDER BY paid_at DESC, id DESC`,
+            [contract.reservation_id],
+          )
+        : []
+
+      const payments = [
+        ...contractPayments.map((payment) => ({ ...payment, source: 'contract' as const })),
+        ...reservationPayments.map((payment) => ({
+          id: -payment.id,
+          contract_id: id,
+          amount: payment.amount,
+          method: payment.method,
+          paid_at: payment.paid_at,
+          note: payment.notes || payment.reference || '',
+          source: 'reservation' as const,
+        })),
+      ].sort((a, b) => new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime())
+
+      const reservationContractCount = contract.reservation_id
+        ? helpers.queryOne<{ c: number }>(
+            `SELECT COUNT(*) as c FROM contracts WHERE reservation_id = ? AND deleted_at IS NULL`,
+            [contract.reservation_id],
+          )?.c ?? 0
+        : 0
+
+      const returnInfo = helpers.queryOne('SELECT * FROM returns WHERE contract_id = ?', [id])
+      return {
+        ...mapListRow(contract),
+        payments,
+        returnInfo,
+        reservation_contract_count: reservationContractCount,
+      }
+    },
+
+    createContract(data: ContractInput) {
+      const normalized = normalizeInput(data)
+      if (!normalized.client_id || !normalized.car_id) throw new Error('CLIENT_AND_CAR_REQUIRED')
+
+      assertClientAndCarExist(helpers, normalized.client_id, normalized.car_id)
+      assertLinkedReservationConsistency(
+        helpers,
+        normalized.reservation_id,
+        normalized.client_id,
+        normalized.car_id,
+      )
+
+      if (
+        normalized.status !== 'draft' &&
+        !carsApi.isCarRentable(normalized.car_id, normalized.start_date, normalized.end_date)
+      ) {
+        throw new Error('CAR_NOT_AVAILABLE')
+      }
+
+      if (normalized.reservation_id) {
+        const existing = helpers.queryOne(
+          `SELECT id FROM contracts WHERE reservation_id = ? AND deleted_at IS NULL`,
+          [normalized.reservation_id],
+        )
+        if (existing) throw new Error('CONTRACT_ALREADY_EXISTS')
+      }
+
+      const t = helpers.now()
+      const contractNumber = nextNumber(helpers)
+
+      const id = helpers.runInsert(
+        `INSERT INTO contracts (
+          contract_number, reservation_id, client_id, car_id, status,
+          contract_date, contract_city,
+          driver1_name, driver1_birth_date, driver1_birth_place, driver1_nationality, driver1_address, driver1_phone,
+          driver1_passport_number, driver1_passport_issued_at, driver1_passport_expires_at,
+          driver1_cin_number, driver1_cin_issued_at, driver1_cin_expires_at,
+          driver1_license_number, driver1_license_issued_at, driver1_license_expires_at,
+          driver2_name, driver2_birth_date, driver2_birth_place, driver2_nationality, driver2_address, driver2_phone,
+          driver2_passport_number, driver2_passport_issued_at, driver2_passport_expires_at,
+          driver2_cin_number, driver2_cin_issued_at, driver2_cin_expires_at,
+          driver2_license_number, driver2_license_issued_at, driver2_license_expires_at,
+          vehicle_brand, vehicle_model, vehicle_plate,
+          departure_at, departure_place, departure_mileage, departure_fuel_level,
+          return_at, return_place, return_mileage, return_fuel_level,
+          billed_days, extension_until, extension_days, departure_notes, return_notes,
+          equipment, equipment_other, departure_damages, return_damages, include_damage_photos_in_pdf,
+          daily_rate, total_amount, deposit_amount, franchise_applies, franchise_amount,
+          extra_charges, extra_charges_note, vat_applies, vat_rate, discount,
+          delivered_at, closed_at, customer_signed_at, agency_signed_at, notes,
+          start_date, end_date, daily_price, total_days, deposit,
+          created_at, updated_at
+        ) VALUES (${Array(80).fill('?').join(', ')})`,
+        [
+          contractNumber,
+          normalized.reservation_id,
+          normalized.client_id,
+          normalized.car_id,
+          normalized.status,
+          normalized.contract_date,
+          normalized.contract_city,
+          normalized.driver1_name,
+          normalized.driver1_birth_date,
+          normalized.driver1_birth_place,
+          normalized.driver1_nationality,
+          normalized.driver1_address,
+          normalized.driver1_phone,
+          normalized.driver1_passport_number,
+          normalized.driver1_passport_issued_at,
+          normalized.driver1_passport_expires_at,
+          normalized.driver1_cin_number,
+          normalized.driver1_cin_issued_at,
+          normalized.driver1_cin_expires_at,
+          normalized.driver1_license_number,
+          normalized.driver1_license_issued_at,
+          normalized.driver1_license_expires_at,
+          normalized.driver2_name,
+          normalized.driver2_birth_date,
+          normalized.driver2_birth_place,
+          normalized.driver2_nationality,
+          normalized.driver2_address,
+          normalized.driver2_phone,
+          normalized.driver2_passport_number,
+          normalized.driver2_passport_issued_at,
+          normalized.driver2_passport_expires_at,
+          normalized.driver2_cin_number,
+          normalized.driver2_cin_issued_at,
+          normalized.driver2_cin_expires_at,
+          normalized.driver2_license_number,
+          normalized.driver2_license_issued_at,
+          normalized.driver2_license_expires_at,
+          normalized.vehicle_brand,
+          normalized.vehicle_model,
+          normalized.vehicle_plate,
+          normalized.departure_at,
+          normalized.departure_place,
+          normalized.departure_mileage,
+          normalized.departure_fuel_level,
+          normalized.return_at,
+          normalized.return_place,
+          normalized.return_mileage,
+          normalized.return_fuel_level,
+          normalized.billed_days,
+          normalized.extension_until,
+          normalized.extension_days,
+          normalized.departure_notes,
+          normalized.return_notes,
+          normalized.equipment,
+          normalized.equipment_other,
+          normalized.departure_damages,
+          normalized.return_damages,
+          normalized.include_damage_photos_in_pdf,
+          normalized.daily_rate,
+          normalized.total_amount,
+          normalized.deposit_amount,
+          normalized.franchise_applies,
+          normalized.franchise_amount,
+          normalized.extra_charges,
+          normalized.extra_charges_note,
+          normalized.vat_applies,
+          normalized.vat_rate,
+          normalized.discount,
+          normalized.delivered_at,
+          normalized.closed_at,
+          normalized.customer_signed_at,
+          normalized.agency_signed_at,
+          normalized.notes,
+          normalized.start_date,
+          normalized.end_date,
+          normalized.daily_price,
+          normalized.total_days,
+          normalized.deposit,
+          t,
+          t,
+        ],
+      )
+
+      const row = this.getContract(id)
+      if (!row) throw new Error('CONTRACT_CREATE_FAILED')
+      return row
+    },
+
+    createFromReservation(reservationId: number) {
+      const reservation = helpers.queryOne<Record<string, unknown>>(
+        'SELECT * FROM reservations WHERE id = ?',
+        [reservationId],
+      )
+      if (!reservation) throw new Error('RESERVATION_NOT_FOUND')
+
+      const existing = helpers.queryOne(
+        `SELECT id FROM contracts WHERE reservation_id = ? AND deleted_at IS NULL`,
+        [reservationId],
+      )
+      if (existing) throw new Error('CONTRACT_ALREADY_EXISTS')
+
+      const customer = helpers.queryOne<Record<string, string>>(
+        'SELECT * FROM customers WHERE id = ?',
+        [reservation.customer_id],
+      )
+      const car = carsApi.getCar(Number(reservation.car_id))
+      if (!customer || !car) throw new Error('RESERVATION_DATA_INCOMPLETE')
+
+      const settings = getSettings()
+      let driver = driverSnapshotFromCustomer(customer)
+      if (reservation.chauffeur_id) {
+        const chauffeur = helpers.queryOne<Record<string, string>>(
+          'SELECT * FROM chauffeurs WHERE id = ?',
+          [reservation.chauffeur_id],
+        )
+        if (chauffeur) driver = driverSnapshotFromChauffeur(chauffeur)
+      }
+
+      return this.createContract({
+        reservation_id: reservationId,
+        client_id: Number(reservation.customer_id),
+        car_id: Number(reservation.car_id),
+        status: 'draft',
+        contract_date: new Date().toISOString().slice(0, 10),
+        contract_city: settings.company_city ?? settings.company_address ?? '',
+        departure_at: String(reservation.pickup_date),
+        return_at: String(reservation.return_date),
+        billed_days: Number(reservation.days ?? calcDays(String(reservation.pickup_date), String(reservation.return_date))),
+        daily_rate: Number(reservation.daily_rate ?? car.price_per_day),
+        total_amount: Number(reservation.total_amount),
+        deposit_amount: Number(reservation.deposit_amount ?? 0),
+        vehicle_brand: car.brand,
+        vehicle_model: car.model,
+        vehicle_plate: car.plate_number,
+        departure_mileage: car.mileage,
+        departure_fuel_level: car.fuel_level,
+        departure_notes: car.condition_notes,
+        vat_applies: 1,
+        vat_rate: 20,
+        franchise_amount: Number(settings.default_franchise_amount ?? 0),
+        franchise_applies: Number(settings.default_franchise_amount ?? 0) > 0 ? 1 : 0,
+        equipment: JSON.stringify([...DEFAULT_EQUIPMENT]),
+        include_damage_photos_in_pdf: 1,
+        ...driver,
+      })
+    },
+
+    updateContract(id: number, data: ContractInput) {
+      const existing = helpers.queryOne<ContractRecord>('SELECT * FROM contracts WHERE id = ? AND deleted_at IS NULL', [id])
+      if (!existing) throw new Error('CONTRACT_NOT_FOUND')
+
+      const normalized = normalizeInput(data, existing)
+
+      assertClientAndCarExist(helpers, normalized.client_id, normalized.car_id)
+      assertLinkedReservationConsistency(
+        helpers,
+        normalized.reservation_id,
+        normalized.client_id,
+        normalized.car_id,
+      )
+
+      if (normalized.reservation_id) {
+        const duplicate = helpers.queryOne(
+          `SELECT id FROM contracts WHERE reservation_id = ? AND deleted_at IS NULL AND id != ?`,
+          [normalized.reservation_id, id],
+        )
+        if (duplicate) throw new Error('CONTRACT_ALREADY_EXISTS')
+      }
+
+      const t = helpers.now()
+
+      helpers.run(
+        `UPDATE contracts SET
+          reservation_id = ?, client_id = ?, car_id = ?, status = ?,
+          contract_date = ?, contract_city = ?,
+          driver1_name = ?, driver1_birth_date = ?, driver1_birth_place = ?, driver1_nationality = ?, driver1_address = ?, driver1_phone = ?,
+          driver1_passport_number = ?, driver1_passport_issued_at = ?, driver1_passport_expires_at = ?,
+          driver1_cin_number = ?, driver1_cin_issued_at = ?, driver1_cin_expires_at = ?,
+          driver1_license_number = ?, driver1_license_issued_at = ?, driver1_license_expires_at = ?,
+          driver2_name = ?, driver2_birth_date = ?, driver2_birth_place = ?, driver2_nationality = ?, driver2_address = ?, driver2_phone = ?,
+          driver2_passport_number = ?, driver2_passport_issued_at = ?, driver2_passport_expires_at = ?,
+          driver2_cin_number = ?, driver2_cin_issued_at = ?, driver2_cin_expires_at = ?,
+          driver2_license_number = ?, driver2_license_issued_at = ?, driver2_license_expires_at = ?,
+          vehicle_brand = ?, vehicle_model = ?, vehicle_plate = ?,
+          departure_at = ?, departure_place = ?, departure_mileage = ?, departure_fuel_level = ?,
+          return_at = ?, return_place = ?, return_mileage = ?, return_fuel_level = ?,
+          billed_days = ?, extension_until = ?, extension_days = ?, departure_notes = ?, return_notes = ?,
+          equipment = ?, equipment_other = ?, departure_damages = ?, return_damages = ?, include_damage_photos_in_pdf = ?,
+          daily_rate = ?, total_amount = ?, deposit_amount = ?, franchise_applies = ?, franchise_amount = ?,
+          extra_charges = ?, extra_charges_note = ?, vat_applies = ?, vat_rate = ?, discount = ?,
+          delivered_at = ?, closed_at = ?, customer_signed_at = ?, agency_signed_at = ?, notes = ?,
+          start_date = ?, end_date = ?, daily_price = ?, total_days = ?, deposit = ?,
+          updated_at = ?
+         WHERE id = ?`,
+        [
+          normalized.reservation_id,
+          normalized.client_id,
+          normalized.car_id,
+          normalized.status,
+          normalized.contract_date,
+          normalized.contract_city,
+          normalized.driver1_name,
+          normalized.driver1_birth_date,
+          normalized.driver1_birth_place,
+          normalized.driver1_nationality,
+          normalized.driver1_address,
+          normalized.driver1_phone,
+          normalized.driver1_passport_number,
+          normalized.driver1_passport_issued_at,
+          normalized.driver1_passport_expires_at,
+          normalized.driver1_cin_number,
+          normalized.driver1_cin_issued_at,
+          normalized.driver1_cin_expires_at,
+          normalized.driver1_license_number,
+          normalized.driver1_license_issued_at,
+          normalized.driver1_license_expires_at,
+          normalized.driver2_name,
+          normalized.driver2_birth_date,
+          normalized.driver2_birth_place,
+          normalized.driver2_nationality,
+          normalized.driver2_address,
+          normalized.driver2_phone,
+          normalized.driver2_passport_number,
+          normalized.driver2_passport_issued_at,
+          normalized.driver2_passport_expires_at,
+          normalized.driver2_cin_number,
+          normalized.driver2_cin_issued_at,
+          normalized.driver2_cin_expires_at,
+          normalized.driver2_license_number,
+          normalized.driver2_license_issued_at,
+          normalized.driver2_license_expires_at,
+          normalized.vehicle_brand,
+          normalized.vehicle_model,
+          normalized.vehicle_plate,
+          normalized.departure_at,
+          normalized.departure_place,
+          normalized.departure_mileage,
+          normalized.departure_fuel_level,
+          normalized.return_at,
+          normalized.return_place,
+          normalized.return_mileage,
+          normalized.return_fuel_level,
+          normalized.billed_days,
+          normalized.extension_until,
+          normalized.extension_days,
+          normalized.departure_notes,
+          normalized.return_notes,
+          normalized.equipment,
+          normalized.equipment_other,
+          normalized.departure_damages,
+          normalized.return_damages,
+          normalized.include_damage_photos_in_pdf,
+          normalized.daily_rate,
+          normalized.total_amount,
+          normalized.deposit_amount,
+          normalized.franchise_applies,
+          normalized.franchise_amount,
+          normalized.extra_charges,
+          normalized.extra_charges_note,
+          normalized.vat_applies,
+          normalized.vat_rate,
+          normalized.discount,
+          normalized.delivered_at,
+          normalized.closed_at,
+          normalized.customer_signed_at,
+          normalized.agency_signed_at,
+          normalized.notes,
+          normalized.start_date,
+          normalized.end_date,
+          normalized.daily_price,
+          normalized.total_days,
+          normalized.deposit,
+          t,
+          id,
+        ],
+      )
+
+      return this.getContract(id)
+    },
+
+    deleteContract(id: number) {
+      const existing = helpers.queryOne('SELECT id FROM contracts WHERE id = ?', [id])
+      if (!existing) throw new Error('CONTRACT_NOT_FOUND')
+      helpers.run('UPDATE contracts SET deleted_at = ?, updated_at = ? WHERE id = ?', [helpers.now(), helpers.now(), id])
+      return { ok: true }
+    },
+
+    restoreContract(id: number) {
+      helpers.run('UPDATE contracts SET deleted_at = NULL, updated_at = ? WHERE id = ?', [helpers.now(), id])
+      return this.getContract(id)
+    },
+
+    markDelivered(id: number) {
+      const existing = helpers.queryOne<ContractRecord>('SELECT * FROM contracts WHERE id = ?', [id])
+      if (!existing) throw new Error('CONTRACT_NOT_FOUND')
+      if (existing.status !== 'draft') throw new Error('INVALID_CONTRACT_STATUS')
+      const t = helpers.now()
+      helpers.run(`UPDATE contracts SET status = 'active', delivered_at = ?, updated_at = ? WHERE id = ?`, [t, t, id])
+      return this.getContract(id)
+    },
+
+    closeContract(id: number, data: CloseContractInput) {
+      const existing = helpers.queryOne<ContractRecord>('SELECT * FROM contracts WHERE id = ?', [id])
+      if (!existing) throw new Error('CONTRACT_NOT_FOUND')
+      if (existing.status !== 'active') throw new Error('INVALID_CONTRACT_STATUS')
+
+      const t = helpers.now()
+      const return_at = data.return_at ?? t
+      const existingExtra = Number(existing.extra_charges ?? 0)
+      let extra_charges = existingExtra
+      let total_amount = Number(existing.total_amount ?? 0)
+
+      if (data.return_extra_fees !== undefined) {
+        const add = Number(data.return_extra_fees ?? 0)
+        extra_charges = existingExtra + add
+        total_amount += add
+      } else if (data.extra_charges !== undefined) {
+        extra_charges = Number(data.extra_charges)
+        total_amount += extra_charges - existingExtra
+      }
+
+      const return_damages = data.return_damages ? JSON.stringify(data.return_damages) : existing.return_damages
+
+      helpers.run(
+        `UPDATE contracts SET
+          status = 'closed', closed_at = ?, return_at = ?, return_mileage = ?, return_fuel_level = ?,
+          return_notes = ?, return_damages = ?, extra_charges = ?, extra_charges_note = ?, total_amount = ?,
+          end_date = ?, updated_at = ?
+         WHERE id = ?`,
+        [
+          t,
+          return_at,
+          data.return_mileage ?? existing.return_mileage,
+          data.return_fuel_level ?? existing.return_fuel_level,
+          data.return_notes ?? existing.return_notes,
+          return_damages,
+          extra_charges,
+          data.extra_charges_note ?? existing.extra_charges_note,
+          total_amount,
+          datePart(return_at),
+          t,
+          id,
+        ],
+      )
+
+      if (existing.car_id && data.return_mileage) {
+        helpers.run(
+          `UPDATE cars SET mileage = ?, fuel_level = COALESCE(NULLIF(?, ''), fuel_level),
+           condition_notes = COALESCE(NULLIF(?, ''), condition_notes), updated_at = ? WHERE id = ?`,
+          [
+            data.return_mileage,
+            data.return_fuel_level ?? '',
+            data.return_notes ?? '',
+            helpers.now(),
+            existing.car_id,
+          ],
+        )
+      }
+
+      return this.getContract(id)
+    },
+
+    cancelContract(id: number) {
+      const existing = helpers.queryOne<ContractRecord>('SELECT * FROM contracts WHERE id = ?', [id])
+      if (!existing) throw new Error('CONTRACT_NOT_FOUND')
+      if (existing.status === 'closed') throw new Error('INVALID_CONTRACT_STATUS')
+      helpers.run(`UPDATE contracts SET status = 'cancelled', updated_at = ? WHERE id = ?`, [helpers.now(), id])
+      return this.getContract(id)
+    },
+
+    getContractStats() {
+      const active = helpers.queryOne<{ c: number }>(`SELECT COUNT(*) as c FROM contracts WHERE status = 'active' AND deleted_at IS NULL`)
+      const overdue = helpers.queryOne<{ c: number }>(
+        `SELECT COUNT(*) as c FROM contracts
+         WHERE status = 'active' AND deleted_at IS NULL
+           AND datetime(COALESCE(NULLIF(return_at,''), end_date)) < datetime('now')`,
+      )
+      return { active: active?.c ?? 0, overdue: overdue?.c ?? 0 }
+    },
+
+    invoiceBreakdown(id: number) {
+      const contract = helpers.queryOne<ContractRecord>('SELECT * FROM contracts WHERE id = ?', [id])
+      if (!contract) throw new Error('CONTRACT_NOT_FOUND')
+      const ttc = contract.total_amount
+      const vatRate = contract.vat_applies ? contract.vat_rate : 0
+      const ht = vatRate > 0 ? ttc / (1 + vatRate / 100) : ttc
+      const vat = ttc - ht
+      return {
+        total_ht: ht,
+        total_vat: vat,
+        total_ttc: ttc,
+        lines: [
+          { label: 'Location', amount: contract.billed_days * contract.daily_rate },
+          { label: 'Frais supplémentaires', amount: contract.extra_charges },
+        ],
+      }
+    },
+  }
+}
