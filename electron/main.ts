@@ -30,6 +30,18 @@ import {
   pickChauffeurDocument,
 } from './chauffeurs-files'
 import { getCompanyLogoUrl, pickCompanyLogo, removeCompanyLogo } from './settings-files'
+import {
+  activateLicense,
+  assertLicenseValid,
+  getLicenseStatus,
+  initLicense,
+  isLicenseChannel,
+} from './license'
+import {
+  sendWhatsAppContract,
+  sendWhatsAppPaymentReminder,
+  sendWhatsAppReturnReminder,
+} from './whatsapp'
 
 process.env.DIST = path.join(__dirname, '../dist')
 process.env.VITE_PUBLIC = app.isPackaged
@@ -53,7 +65,9 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 async function createWindow() {
-  await initDb(app.getPath('userData'))
+  const userDataPath = app.getPath('userData')
+  initLicense(userDataPath)
+  await initDb(userDataPath)
 
   win = new BrowserWindow({
     width: 1280,
@@ -78,6 +92,28 @@ async function createWindow() {
 
 function registerIpc() {
   const api = getDbApi()
+
+  const originalHandle = ipcMain.handle.bind(ipcMain)
+  ipcMain.handle = ((channel: string, handler: Parameters<typeof ipcMain.handle>[1]) => {
+    if (isLicenseChannel(channel)) {
+      return originalHandle(channel, handler)
+    }
+    return originalHandle(channel, async (event, ...args) => {
+      assertLicenseValid()
+      return handler(event, ...args)
+    })
+  }) as typeof ipcMain.handle
+
+  ipcMain.handle('license:status', () => getLicenseStatus())
+  ipcMain.handle('license:activate', (_e, key: string) => activateLicense(key))
+
+  ipcMain.handle('whatsapp:contract', (_e, contractId: number) => sendWhatsAppContract(contractId))
+  ipcMain.handle('whatsapp:paymentReminder', (_e, reservationId: number) =>
+    sendWhatsAppPaymentReminder(reservationId),
+  )
+  ipcMain.handle('whatsapp:returnReminder', (_e, input: { contractId?: number; reservationId?: number }) =>
+    sendWhatsAppReturnReminder(input),
+  )
 
   ipcMain.handle('dashboard:stats', () => api.getDashboardStats())
   ipcMain.handle('cars:stats', () => api.getCarStats())

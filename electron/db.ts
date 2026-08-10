@@ -217,12 +217,17 @@ export async function initDb(userDataPath: string) {
   ensureSetting('notification_return_days', '1')
   ensureSetting('notification_doc_days', '30')
 
-  const orphanImages = queryAll<{ id: number; path: string }>('SELECT id, path FROM car_images')
+  const orphanImages = queryAll<{ id: number; path: string; car_id: number }>(
+    'SELECT id, path, car_id FROM car_images',
+  )
   for (const img of orphanImages) {
-    if (!fileExists(img.path)) {
+    if (!fileExists(img.path) || !img.car_id) {
       run('DELETE FROM car_images WHERE id = ?', [img.id])
     }
   }
+  run(
+    `DELETE FROM car_images WHERE car_id NOT IN (SELECT id FROM cars)`,
+  )
 
   db.run(`
     CREATE TABLE IF NOT EXISTS clients (

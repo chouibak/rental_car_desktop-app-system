@@ -40,6 +40,7 @@ import ChauffeurDetailPage from './pages/ChauffeurDetailPage'
 import SettingsPage from './pages/SettingsPage'
 import NotificationsPage from './pages/NotificationsPage'
 import { NotificationBell } from './components/NotificationBell'
+import { LicenseTrialProvider } from './components/LicenseTrialBanner'
 
 const navIcons = {
   '/': IconDashboard,
@@ -103,6 +104,7 @@ export default function App() {
   ]
 
   return (
+    <LicenseTrialProvider>
     <div className={`app-shell${sidebarOpen ? '' : ' sidebar-collapsed'}`} dir={dir}>
       <aside className="sidebar">
         <div className="sidebar-brand">
@@ -195,5 +197,6 @@ export default function App() {
         </Routes>
       </main>
     </div>
+    </LicenseTrialProvider>
   )
 }

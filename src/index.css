@@ -3341,3 +3341,170 @@ th {
   font-weight: 600;
   color: var(--accent);
 }
+
+.license-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: linear-gradient(145deg, #0f172a 0%, #1e293b 45%, #0f766e 100%);
+}
+
+.license-card {
+  width: min(100%, 460px);
+  background: #fff;
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.35);
+}
+
+.license-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.license-brand-mark {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent), #059669);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 1.1rem;
+}
+
+.license-brand h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.license-alert {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+}
+
+.license-alert--warn {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.license-alert strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.license-alert p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.license-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.license-input {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.license-error {
+  margin: 0;
+  color: #dc2626;
+  font-size: 0.9rem;
+}
+
+.license-submit {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.license-footer {
+  margin: 16px 0 0;
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+.license-trial-dashboard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+}
+
+.license-trial-dashboard--urgent {
+  background: #fff7ed;
+  border-color: #fdba74;
+}
+
+.license-trial-dashboard-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.license-trial-dashboard-main strong {
+  color: #065f46;
+  font-size: 0.95rem;
+}
+
+.license-trial-dashboard--urgent .license-trial-dashboard-main strong {
+  color: #9a3412;
+}
+
+.license-trial-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #047857;
+  background: #d1fae5;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.license-trial-dashboard--urgent .license-trial-label {
+  color: #9a3412;
+  background: #ffedd5;
+}
+
+.license-trial-date {
+  font-size: 0.85rem;
+}
+
+.whatsapp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #25d366;
+  border-color: #25d366;
+  color: #fff;
+}
+
+.whatsapp-btn:hover:not(:disabled) {
+  background: #1ebe57;
+  border-color: #1ebe57;
+  color: #fff;
+}
+
+.whatsapp-btn--sm {
+  padding: 6px 10px;
+  min-height: 32px;
+}

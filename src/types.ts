@@ -517,6 +517,18 @@ export type PickedFile = {
   name?: string
 }
 
+export type LicenseStatus = {
+  valid: boolean
+  activated: boolean
+  type: 'trial_7d' | 'trial_5min' | 'lifetime' | null
+  activatedAt: string | null
+  expiresAt: string | null
+  daysRemaining: number | null
+  minutesRemaining: number | null
+  expired: boolean
+  isTrial: boolean
+}
+
 declare global {
   interface Window {
     api: {
@@ -644,6 +656,18 @@ declare global {
       pickCompanyLogo: () => Promise<{ path: string; url: string } | null>
       getCompanyLogoUrl: (filePath: string) => Promise<string>
       removeCompanyLogo: (filePath: string) => Promise<{ ok: boolean }>
+      getLicenseStatus: () => Promise<LicenseStatus>
+      activateLicense: (
+        key: string,
+      ) => Promise<{ ok: true; status: LicenseStatus } | { ok: false; error: string }>
+      sendWhatsAppContract: (contractId: number) => Promise<{ ok: true } | { ok: false; error: string }>
+      sendWhatsAppPaymentReminder: (
+        reservationId: number,
+      ) => Promise<{ ok: true } | { ok: false; error: string }>
+      sendWhatsAppReturnReminder: (input: {
+        contractId?: number
+        reservationId?: number
+      }) => Promise<{ ok: true } | { ok: false; error: string }>
     }
   }
 }

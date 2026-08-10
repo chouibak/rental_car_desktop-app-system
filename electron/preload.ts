@@ -100,6 +100,15 @@ const api = {
   pickCompanyLogo: () => ipcRenderer.invoke('settings:pickLogo'),
   getCompanyLogoUrl: (filePath: string) => ipcRenderer.invoke('settings:getLogoUrl', filePath),
   removeCompanyLogo: (filePath: string) => ipcRenderer.invoke('settings:removeLogo', filePath),
+
+  getLicenseStatus: () => ipcRenderer.invoke('license:status'),
+  activateLicense: (key: string) => ipcRenderer.invoke('license:activate', key),
+
+  sendWhatsAppContract: (contractId: number) => ipcRenderer.invoke('whatsapp:contract', contractId),
+  sendWhatsAppPaymentReminder: (reservationId: number) =>
+    ipcRenderer.invoke('whatsapp:paymentReminder', reservationId),
+  sendWhatsAppReturnReminder: (input: { contractId?: number; reservationId?: number }) =>
+    ipcRenderer.invoke('whatsapp:returnReminder', input),
 }
 
 contextBridge.exposeInMainWorld('api', api)

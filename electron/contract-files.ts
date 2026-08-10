@@ -31,15 +31,23 @@ export async function pickContractDamagePhoto(
   return { path: storedPath, url: readFileAsDataUrl(storedPath) }
 }
 
-export async function generateContractPdf(contractId: number) {
+export async function ensureContractPdf(contractId: number) {
   const api = getDbApi()
   const contract = api.getContract(contractId)
   if (!contract) throw new Error('CONTRACT_NOT_FOUND')
 
-  const settings = api.getSettings()
-  const breakdown = api.getContractInvoiceBreakdown(contractId)
   const outputPath = pdfPathForContract(contract.contract_number)
-  await buildContractPdf(outputPath, contract, settings, breakdown)
+  if (!fs.existsSync(outputPath)) {
+    const settings = api.getSettings()
+    const breakdown = api.getContractInvoiceBreakdown(contractId)
+    await buildContractPdf(outputPath, contract, settings, breakdown)
+  }
+
+  return outputPath
+}
+
+export async function generateContractPdf(contractId: number) {
+  const outputPath = await ensureContractPdf(contractId)
   await shell.openPath(outputPath)
   return { ok: true, path: outputPath }
 }

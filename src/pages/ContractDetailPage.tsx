@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { IconTrash } from '../components/icons'
 import { ContractDamagesView } from '../components/ContractDamagesView'
+import { WhatsAppButton } from '../components/WhatsAppButton'
 import { CarStatusBadge, EmptyState, PageHeader, PaymentBadge, StatCard, StatusBadge } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import type { Car, Contract } from '../types'
@@ -192,6 +193,10 @@ export default function ContractDetailPage() {
         <button type="button" className="btn secondary" onClick={openPdf}>
           {t.downloadPdf}
         </button>
+        <WhatsAppButton
+          label={t.whatsappContract}
+          onSend={() => window.api.sendWhatsAppContract(contract.id)}
+        />
         {canManage && (
           <>
             <button type="button" className="btn secondary" onClick={() => setPayOpen(true)}>

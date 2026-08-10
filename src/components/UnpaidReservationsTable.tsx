@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { IconChevronRight } from './icons'
 import { EmptyState, PaymentBadge } from './ui'
+import { WhatsAppButton } from './WhatsAppButton'
 import { useLang } from '../context/LangContext'
 import type { Reservation } from '../types'
 
@@ -75,13 +76,14 @@ export function UnpaidReservationsTable({ search = '', refreshKey = 0 }: UnpaidR
               <th>{t.paidRental}</th>
               <th>{t.remaining}</th>
               <th>{t.paymentStatus}</th>
+              <th>{t.actions}</th>
               <th aria-hidden />
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={9}>
                   <EmptyState message={t.noUnpaid} />
                 </td>
               </tr>
@@ -110,6 +112,13 @@ export function UnpaidReservationsTable({ search = '', refreshKey = 0 }: UnpaidR
                     status={
                       row.remaining <= 0 ? 'paid' : row.paid_amount > 0 ? 'partial' : 'unpaid'
                     }
+                  />
+                </td>
+                <td>
+                  <WhatsAppButton
+                    size="sm"
+                    title={t.whatsappPayment}
+                    onSend={() => window.api.sendWhatsAppPaymentReminder(row.id)}
                   />
                 </td>
                 <td>

@@ -8,6 +8,8 @@ import {
 import { RevenueNetChart, RevenueTrendChart } from '../components/RevenueCharts'
 import { formatContractDatetime } from '../utils/contracts'
 import { PageHeader, StatCard, StatusBadge } from '../components/ui'
+import { WhatsAppButton } from '../components/WhatsAppButton'
+import { LicenseTrialDashboard } from '../components/LicenseTrialBanner'
 import { useLang } from '../context/LangContext'
 import type { DashboardStats } from '../types'
 
@@ -26,6 +28,7 @@ export default function DashboardPage() {
   return (
     <div className="dashboard-page">
       <PageHeader title={t.dashboard} subtitle={t.dashboardSubtitle} />
+      <LicenseTrialDashboard />
 
       <div className="cards">
         <StatCard label={t.totalCars} value={stats.cars} />
@@ -202,12 +205,13 @@ export default function DashboardPage() {
                 <th>{t.car}</th>
                 <th>{t.returnAt}</th>
                 <th>{t.status}</th>
+                <th>{t.actions}</th>
               </tr>
             </thead>
             <tbody>
               {stats.upcomingReturns.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="empty">
+                  <td colSpan={6} className="empty">
                     {t.noData}
                   </td>
                 </tr>
@@ -238,6 +242,19 @@ export default function DashboardPage() {
                   </td>
                   <td>
                     <StatusBadge status={item.status === 'completed' ? 'closed' : item.status} />
+                  </td>
+                  <td>
+                    <WhatsAppButton
+                      size="sm"
+                      title={t.whatsappReturn}
+                      onSend={() =>
+                        window.api.sendWhatsAppReturnReminder(
+                          item.contract_id
+                            ? { contractId: item.contract_id }
+                            : { reservationId: item.reservation_id ?? undefined },
+                        )
+                      }
+                    />
                   </td>
                 </tr>
               ))}
