@@ -1,9 +1,9 @@
 {
   "name": "rental-car-crm",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "CRM de location de voitures — application bureau",
   "main": "dist-electron/main.js",
-  "author": "RentalCar CRM",
+  "author": "LocAgence Pro",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
@@ -14,7 +14,7 @@
   },
   "build": {
     "appId": "com.rentalcar.crm",
-    "productName": "RentalCar CRM",
+    "productName": "LocAgence Pro",
     "directories": {
       "output": "release"
     },
@@ -42,9 +42,9 @@
       "allowElevation": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
-      "shortcutName": "RentalCar CRM",
-      "uninstallDisplayName": "RentalCar CRM",
-      "artifactName": "RentalCarCRM-Setup-${version}.exe"
+      "shortcutName": "LocAgence Pro",
+      "uninstallDisplayName": "LocAgence Pro",
+      "artifactName": "LocAgencePro-Setup-${version}.exe"
     }
   },
   "dependencies": {

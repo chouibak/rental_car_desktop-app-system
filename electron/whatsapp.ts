@@ -166,7 +166,7 @@ export async function sendWhatsAppContract(contractId: number): Promise<WhatsApp
 
   const settings = api.getSettings()
   const lang = getLang(settings)
-  const company = settings.company_name?.trim() || 'RentalCar CRM'
+  const company = settings.company_name?.trim() || 'LocAgence Pro'
   const carLabel = [
     contract.vehicle_brand || contract.brand,
     contract.vehicle_model || contract.model,
@@ -202,7 +202,7 @@ export async function sendWhatsAppPaymentReminder(reservationId: number): Promis
 
   const settings = api.getSettings()
   const lang = getLang(settings)
-  const company = settings.company_name?.trim() || 'RentalCar CRM'
+  const company = settings.company_name?.trim() || 'LocAgence Pro'
   const paid = reservation.paid_amount ?? 0
   const remaining = Math.max(0, reservation.total_amount - paid)
   const carLabel = [reservation.car_name, reservation.car_plate].filter(Boolean).join(' · ')
@@ -227,7 +227,7 @@ export async function sendWhatsAppReturnReminder(input: {
   const api = getDbApi()
   const settings = api.getSettings()
   const lang = getLang(settings)
-  const company = settings.company_name?.trim() || 'RentalCar CRM'
+  const company = settings.company_name?.trim() || 'LocAgence Pro'
 
   if (input.contractId) {
     const contract = api.getContract(input.contractId)

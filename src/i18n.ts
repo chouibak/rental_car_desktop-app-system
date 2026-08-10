@@ -1,7 +1,7 @@
 import type { Lang } from './types'
 
 const fr = {
-  appName: 'RentalCar CRM',
+  appName: 'LocAgence Pro',
   dashboard: 'Tableau de bord',
   cars: 'Voitures',
   clients: 'Clients',
@@ -581,7 +581,7 @@ const fr = {
 }
 
 const ar: typeof fr = {
-  appName: 'نظام تأجير السيارات',
+  appName: 'LocAgence Pro',
   dashboard: 'لوحة التحكم',
   cars: 'السيارات',
   clients: 'الزبائن',

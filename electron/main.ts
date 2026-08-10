@@ -74,7 +74,7 @@ async function createWindow() {
     height: 800,
     minWidth: 1000,
     minHeight: 650,
-    title: 'RentalCar CRM',
+    title: 'LocAgence Pro',
     icon: path.join(__dirname, '../build/icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
