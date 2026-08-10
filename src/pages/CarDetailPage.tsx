@@ -1,10 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { IconEdit, IconTrash } from '../components/icons'
-import { PageHeader } from '../components/ui'
+import { CarDocCard } from '../components/CarDocCard'
+import { CarExpenseModal } from '../components/CarExpenseModal'
+import { IconEdit, IconPlus, IconTrash } from '../components/icons'
+import { EmptyState, PageHeader, StatCard } from '../components/ui'
 import { useLang } from '../context/LangContext'
-import { fileBasename } from '../utils/file'
-import type { Car, CarComputedStatus } from '../types'
+import type { Dict } from '../i18n'
+import { formatDisplayDate } from '../utils/customer'
+import type { Car, CarComputedStatus, Expense, ExpenseCategory } from '../types'
 
 const STATUSES: CarComputedStatus[] = ['disponible', 'louee', 'hors_service']
 
@@ -16,17 +19,38 @@ const DOC_FIELDS = [
   { pathKey: 'doc_autorisation_path', expiryKey: 'doc_autorisation_expiry', labelKey: 'autorisation' },
 ] as const
 
+const EXPENSE_CATEGORY_KEYS: Record<ExpenseCategory, keyof Dict> = {
+  fuel: 'expenseFuel',
+  maintenance: 'expenseMaintenance',
+  insurance: 'expenseInsurance',
+  rent: 'expenseRent',
+  salaries: 'expenseSalaries',
+  utilities: 'expenseUtilities',
+  marketing: 'expenseMarketing',
+  office: 'expenseOffice',
+  other: 'expenseOther',
+}
+
 export default function CarDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { t, money } = useLang()
   const [car, setCar] = useState<Car | null>(null)
+  const [expenses, setExpenses] = useState<Expense[]>([])
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
   const [activePhoto, setActivePhoto] = useState('')
+  const [expenseModalOpen, setExpenseModalOpen] = useState(false)
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
+
+  const loadExpenses = useCallback(async (carId: number) => {
+    const list = await window.api.listExpenses({ car_id: carId })
+    setExpenses(list)
+  }, [])
 
   useEffect(() => {
     if (!id) return
-    window.api.getCar(Number(id)).then(async (data) => {
+    const carId = Number(id)
+    window.api.getCar(carId).then(async (data) => {
       if (!data) {
         navigate('/cars')
         return
@@ -47,9 +71,15 @@ export default function CarDetailPage() {
         setPhotoUrls((prev) => ({ ...prev, [data.thumbnail!]: thumbUrl }))
         setActivePhoto(data.thumbnail)
       }
-
     })
-  }, [id, navigate])
+
+    loadExpenses(carId)
+  }, [id, navigate, loadExpenses])
+
+  const expenseTotal = useMemo(
+    () => expenses.reduce((sum, item) => sum + item.amount, 0),
+    [expenses],
+  )
 
   const onOpenDocument = async (filePath: string) => {
     try {
@@ -67,6 +97,43 @@ export default function CarDetailPage() {
     } catch {
       alert(t.statusUpdateFailed)
     }
+  }
+
+  const onDeleteExpense = async (expenseId: number) => {
+    if (!confirm(t.confirmDelete)) return
+    try {
+      await window.api.deleteExpense(expenseId)
+      setExpenses((current) => current.filter((item) => item.id !== expenseId))
+    } catch {
+      alert(t.cannotDeleteExpense)
+    }
+  }
+
+  const openAddExpense = () => {
+    setEditingExpense(null)
+    setExpenseModalOpen(true)
+  }
+
+  const openEditExpense = (expense: Expense) => {
+    setEditingExpense(expense)
+    setExpenseModalOpen(true)
+  }
+
+  const closeExpenseModal = () => {
+    setExpenseModalOpen(false)
+    setEditingExpense(null)
+  }
+
+  const onExpenseSaved = (saved: Expense) => {
+    setExpenses((current) => {
+      const index = current.findIndex((item) => item.id === saved.id)
+      if (index >= 0) {
+        const next = [...current]
+        next[index] = saved
+        return next
+      }
+      return [saved, ...current]
+    })
   }
 
   const images = useMemo(() => car?.images ?? [], [car])
@@ -199,35 +266,103 @@ export default function CarDetailPage() {
             <h3>{t.documents}</h3>
           </div>
           <div className="panel-body">
-            <div className="doc-list">
-              {DOC_FIELDS.map((doc) => {
-                const path = car[doc.pathKey]
-                const expiry = car[doc.expiryKey]
-                return (
-                  <div className="doc-row doc-row-readonly" key={doc.pathKey}>
-                    <div className="doc-info">
-                      <strong>{t[doc.labelKey]}</strong>
-                      {path ? (
-                        <>
-                          <span className="muted-text doc-file-name">{fileBasename(path)}</span>
-                          <button type="button" className="link-btn" onClick={() => onOpenDocument(path)}>
-                            {t.viewDocument}
-                          </button>
-                        </>
-                      ) : (
-                        <span className="muted-text">{t.noData}</span>
-                      )}
-                    </div>
-                    <span className="muted-text">
-                      {expiry ? `${t.expiryDate}: ${expiry}` : '—'}
-                    </span>
-                  </div>
-                )
-              })}
+            <div className="car-doc-list">
+              {DOC_FIELDS.map((doc) => (
+                <CarDocCard
+                  key={doc.pathKey}
+                  label={t[doc.labelKey]}
+                  filePath={car[doc.pathKey]}
+                  expiry={car[doc.expiryKey]}
+                  viewLabel={t.viewDocument}
+                  noDataLabel={t.noData}
+                  expiryDateLabel={t.expiryDate}
+                  onOpen={() => onOpenDocument(car[doc.pathKey])}
+                />
+              ))}
             </div>
           </div>
         </div>
       </div>
+
+      <div className="panel car-expenses-panel">
+        <div className="panel-header">
+          <div>
+            <h3>{t.carExpenses}</h3>
+            <p className="panel-subtitle">{t.carExpensesHint}</p>
+          </div>
+          <button type="button" className="btn sm" onClick={openAddExpense}>
+            <IconPlus size={15} />
+            {t.addCarExpense}
+          </button>
+        </div>
+        <div className="panel-body">
+          <div className="car-expenses-summary">
+            <StatCard
+              label={t.carExpensesTotal}
+              value={money(expenseTotal)}
+              hint={`${expenses.length} ${t.expenses.toLowerCase()}`}
+            />
+          </div>
+          {expenses.length === 0 ? (
+            <EmptyState message={t.noData} />
+          ) : (
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>{t.expenseTitle}</th>
+                    <th>{t.category}</th>
+                    <th>{t.amount}</th>
+                    <th>{t.expenseDate}</th>
+                    <th>{t.actions}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expenses.map((expense) => (
+                    <tr key={expense.id}>
+                      <td>
+                        <strong>{expense.title}</strong>
+                        {expense.notes ? <div className="muted text-sm">{expense.notes}</div> : null}
+                      </td>
+                      <td>{t[EXPENSE_CATEGORY_KEYS[expense.category]]}</td>
+                      <td>{money(expense.amount)}</td>
+                      <td>{formatDisplayDate(expense.expense_date)}</td>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="btn secondary sm icon-only"
+                            title={t.edit}
+                            onClick={() => openEditExpense(expense)}
+                          >
+                            <IconEdit size={15} />
+                          </button>
+                          <button
+                            className="btn danger sm icon-only"
+                            title={t.delete}
+                            onClick={() => onDeleteExpense(expense.id)}
+                          >
+                            <IconTrash size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <CarExpenseModal
+        open={expenseModalOpen}
+        carId={car.id}
+        carLabel={`${car.name} · ${car.plate_number}`}
+        expense={editingExpense}
+        onClose={closeExpenseModal}
+        onSaved={onExpenseSaved}
+      />
     </div>
   )
 }

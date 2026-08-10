@@ -48,6 +48,7 @@ import {
 import {
   createExpensesApi,
   createExpensesSchema,
+  migrateExpensesTable,
   type ExpenseFilters,
   type ExpenseInput,
 } from './expenses-db'
@@ -206,6 +207,7 @@ export async function initDb(userDataPath: string) {
   })
 
   createExpensesSchema(db)
+  migrateExpensesTable(db, dbHelpers())
   expensesApi = createExpensesApi(dbHelpers())
 
   createChauffeursSchema(db)

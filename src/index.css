@@ -2621,6 +2621,203 @@ th {
   grid-template-columns: 1fr auto;
 }
 
+.car-doc-list {
+  display: grid;
+  gap: 10px;
+}
+
+.car-doc-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.car-doc-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+
+.car-doc-card-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.car-doc-card-content {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.car-doc-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.car-doc-card-head strong {
+  font-size: 0.95rem;
+}
+
+.car-doc-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.car-doc-card-filename {
+  font-size: 0.82rem;
+  color: var(--muted);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.car-doc-card-empty {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.car-doc-card-date {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.car-doc-card-date time {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.doc-expiry-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.doc-expiry-badge--critical {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.doc-expiry-badge--high {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.doc-expiry-badge--medium {
+  background: #fef9c3;
+  color: #a16207;
+}
+
+.doc-expiry-badge--low {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.doc-expiry-badge--ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.car-expenses-panel {
+  margin-top: 20px;
+}
+
+.car-expenses-panel .panel-header {
+  align-items: flex-start;
+}
+
+.car-expenses-panel .panel-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.car-expenses-summary {
+  max-width: 280px;
+  margin-bottom: 16px;
+}
+
+.car-expense-modal {
+  width: min(480px, 100%);
+}
+
+.car-expense-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.car-expense-modal-header strong {
+  display: block;
+  font-size: 1.05rem;
+}
+
+.car-expense-modal-sub {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.car-expense-modal-body {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.car-expense-receipt {
+  display: grid;
+  gap: 10px;
+}
+
+.car-expense-receipt-img {
+  max-width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.form-grid-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+@media (max-width: 900px) {
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .car-doc-card-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 .customer-doc-row-readonly {
   grid-template-columns: 1.2fr 160px 160px;
 }

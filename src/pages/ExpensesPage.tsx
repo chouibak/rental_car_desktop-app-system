@@ -5,7 +5,7 @@ import { HorizontalBreakdownChart, toCategoryRows } from '../components/RevenueC
 import { EmptyState, PageHeader, StatCard } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import type { Dict } from '../i18n'
-import type { Expense, ExpenseCategory, ExpenseStats } from '../types'
+import type { Car, Expense, ExpenseCategory, ExpenseStats } from '../types'
 import { formatDisplayDate } from '../utils/customer'
 
 const CATEGORIES: ExpenseCategory[] = [
@@ -43,8 +43,10 @@ export default function ExpensesPage() {
   const navigate = useNavigate()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [stats, setStats] = useState<ExpenseStats | null>(null)
+  const [cars, setCars] = useState<Car[]>([])
   const [q, setQ] = useState('')
   const [category, setCategory] = useState<ExpenseCategory | ''>('')
+  const [carId, setCarId] = useState<number | ''>('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
@@ -52,10 +54,11 @@ export default function ExpensesPage() {
     () => ({
       q: q || undefined,
       category: category || undefined,
+      car_id: carId || undefined,
       date_from: dateFrom || undefined,
       date_to: dateTo || undefined,
     }),
-    [q, category, dateFrom, dateTo],
+    [q, category, carId, dateFrom, dateTo],
   )
 
   const load = async () => {
@@ -68,8 +71,12 @@ export default function ExpensesPage() {
   }
 
   useEffect(() => {
+    window.api.listCars().then(setCars)
+  }, [])
+
+  useEffect(() => {
     load()
-  }, [q, category, dateFrom, dateTo])
+  }, [q, category, carId, dateFrom, dateTo])
 
   const onDelete = async (id: number) => {
     if (!confirm(t.confirmDelete)) return
@@ -112,6 +119,19 @@ export default function ExpensesPage() {
             {CATEGORIES.map((item) => (
               <option key={item} value={item}>
                 {categoryLabel(item)}
+              </option>
+            ))}
+          </select>
+          <select
+            className="select select-sm"
+            value={carId}
+            onChange={(e) => setCarId(e.target.value ? Number(e.target.value) : '')}
+            title={t.filterByVehicle}
+          >
+            <option value="">{t.filterByVehicle}</option>
+            {cars.map((car) => (
+              <option key={car.id} value={car.id}>
+                {car.name} — {car.plate_number}
               </option>
             ))}
           </select>
@@ -182,6 +202,7 @@ export default function ExpensesPage() {
               <tr>
                 <th>{t.expenseTitle}</th>
                 <th>{t.category}</th>
+                <th>{t.expenseVehicle}</th>
                 <th>{t.amount}</th>
                 <th>{t.expenseDate}</th>
                 <th>{t.paymentMethod}</th>
@@ -192,7 +213,7 @@ export default function ExpensesPage() {
             <tbody>
               {expenses.length === 0 && (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={8}>
                     <EmptyState message={t.noData} />
                   </td>
                 </tr>
@@ -204,6 +225,16 @@ export default function ExpensesPage() {
                     {expense.notes ? <div className="muted text-sm">{expense.notes}</div> : null}
                   </td>
                   <td>{categoryLabel(expense.category)}</td>
+                  <td>
+                    {expense.car_id ? (
+                      <Link className="link-btn" to={`/cars/${expense.car_id}`}>
+                        {expense.car_name ?? `#${expense.car_id}`}
+                        {expense.car_plate ? ` · ${expense.car_plate}` : ''}
+                      </Link>
+                    ) : (
+                      <span className="muted-text">{t.expenseAgency}</span>
+                    )}
+                  </td>
                   <td>{money(expense.amount)}</td>
                   <td>{formatDisplayDate(expense.expense_date)}</td>
                   <td>{t[PAYMENT_METHOD_KEYS[expense.payment_method]]}</td>

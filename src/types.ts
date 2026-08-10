@@ -426,6 +426,9 @@ export type Expense = {
   payment_method: ExpensePaymentMethod
   receipt_path: string
   notes: string
+  car_id: number | null
+  car_name?: string
+  car_plate?: string
   created_at: string
 }
 
@@ -437,6 +440,7 @@ export type ExpenseInput = {
   payment_method?: ExpensePaymentMethod
   receipt_path?: string
   notes?: string
+  car_id?: number | null | ''
 }
 
 export type ExpenseStats = {
@@ -625,6 +629,7 @@ declare global {
       listExpenses: (filters?: {
         q?: string
         category?: ExpenseCategory | ''
+        car_id?: number | ''
         date_from?: string
         date_to?: string
       }) => Promise<Expense[]>
@@ -635,6 +640,7 @@ declare global {
       getExpenseStats: (filters?: {
         q?: string
         category?: ExpenseCategory | ''
+        car_id?: number | ''
         date_from?: string
         date_to?: string
       }) => Promise<ExpenseStats>
@@ -645,6 +651,7 @@ declare global {
       exportExpensesExcel: (filters?: {
         q?: string
         category?: ExpenseCategory | ''
+        car_id?: number | ''
         date_from?: string
         date_to?: string
       }) => Promise<{ ok: boolean; canceled?: boolean; filePath?: string }>

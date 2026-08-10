@@ -690,6 +690,7 @@ export function createCarsApi(helpers: DbHelpers) {
       }
 
       helpers.run('DELETE FROM car_images WHERE car_id = ?', [id])
+      helpers.run('UPDATE expenses SET car_id = NULL WHERE car_id = ?', [id])
       helpers.run('DELETE FROM cars WHERE id = ?', [id])
       deleteCarStorage(id)
       return { ok: true }

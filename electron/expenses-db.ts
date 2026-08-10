@@ -24,6 +24,9 @@ export type ExpenseRecord = {
   payment_method: ExpensePaymentMethod
   receipt_path: string
   notes: string
+  car_id: number | null
+  car_name?: string
+  car_plate?: string
   created_at: string
 }
 
@@ -35,11 +38,13 @@ export type ExpenseInput = {
   payment_method?: ExpensePaymentMethod
   receipt_path?: string
   notes?: string
+  car_id?: number | null | ''
 }
 
 export type ExpenseFilters = {
   q?: string
   category?: ExpenseCategory | ''
+  car_id?: number | ''
   date_from?: string
   date_to?: string
 }
@@ -104,9 +109,19 @@ export function createExpensesSchema(db: Database) {
       payment_method TEXT NOT NULL DEFAULT 'cash',
       receipt_path TEXT,
       notes TEXT,
+      car_id INTEGER,
       created_at TEXT
     )
   `)
+}
+
+export function migrateExpensesTable(db: Database, helpers: DbHelpers) {
+  createExpensesSchema(db)
+  const info = db.exec('PRAGMA table_info(expenses)')
+  const existing = new Set((info[0]?.values ?? []).map((row) => String(row[1])))
+  if (!existing.has('car_id')) {
+    helpers.run('ALTER TABLE expenses ADD COLUMN car_id INTEGER')
+  }
 }
 
 function normalizeInput(data: ExpenseInput) {
@@ -124,6 +139,16 @@ function normalizeInput(data: ExpenseInput) {
     ? (data.payment_method as ExpensePaymentMethod)
     : 'cash'
 
+  const rawCarId = data.car_id
+  const car_id =
+    rawCarId === null || rawCarId === undefined || rawCarId === ''
+      ? null
+      : Number(rawCarId)
+
+  if (car_id !== null && (!Number.isFinite(car_id) || car_id <= 0)) {
+    throw new Error('INVALID_CAR')
+  }
+
   return {
     title,
     category,
@@ -132,7 +157,50 @@ function normalizeInput(data: ExpenseInput) {
     payment_method,
     receipt_path: data.receipt_path?.trim() || '',
     notes: data.notes?.trim() || '',
+    car_id,
   }
+}
+
+function assertCarExists(helpers: DbHelpers, carId: number | null) {
+  if (!carId) return
+  const car = helpers.queryOne<{ id: number }>('SELECT id FROM cars WHERE id = ?', [carId])
+  if (!car) throw new Error('CAR_NOT_FOUND')
+}
+
+const EXPENSE_SELECT = `
+  SELECT e.*, ca.name as car_name, ca.plate_number as car_plate
+  FROM expenses e
+  LEFT JOIN cars ca ON ca.id = e.car_id
+`
+
+function buildExpenseWhere(filters?: ExpenseFilters) {
+  const clauses: string[] = []
+  const params: unknown[] = []
+
+  if (filters?.q?.trim()) {
+    clauses.push('(e.title LIKE ? OR e.notes LIKE ?)')
+    const q = `%${filters.q.trim()}%`
+    params.push(q, q)
+  }
+  if (filters?.category) {
+    clauses.push('e.category = ?')
+    params.push(filters.category)
+  }
+  if (filters?.car_id) {
+    clauses.push('e.car_id = ?')
+    params.push(Number(filters.car_id))
+  }
+  if (filters?.date_from) {
+    clauses.push('e.expense_date >= ?')
+    params.push(filters.date_from)
+  }
+  if (filters?.date_to) {
+    clauses.push('e.expense_date <= ?')
+    params.push(filters.date_to)
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+  return { where, params }
 }
 
 function finalizeReceiptPath(receiptPath: string, expenseId: number) {
@@ -143,45 +211,25 @@ function finalizeReceiptPath(receiptPath: string, expenseId: number) {
 export function createExpensesApi(helpers: DbHelpers) {
   return {
     listExpenses(filters?: ExpenseFilters): ExpenseRecord[] {
-      const clauses: string[] = []
-      const params: unknown[] = []
-
-      if (filters?.q?.trim()) {
-        clauses.push('(title LIKE ? OR notes LIKE ?)')
-        const q = `%${filters.q.trim()}%`
-        params.push(q, q)
-      }
-      if (filters?.category) {
-        clauses.push('category = ?')
-        params.push(filters.category)
-      }
-      if (filters?.date_from) {
-        clauses.push('expense_date >= ?')
-        params.push(filters.date_from)
-      }
-      if (filters?.date_to) {
-        clauses.push('expense_date <= ?')
-        params.push(filters.date_to)
-      }
-
-      const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+      const { where, params } = buildExpenseWhere(filters)
       return helpers.queryAll<ExpenseRecord>(
-        `SELECT * FROM expenses ${where} ORDER BY expense_date DESC, id DESC`,
+        `${EXPENSE_SELECT} ${where} ORDER BY e.expense_date DESC, e.id DESC`,
         params,
       )
     },
 
     getExpense(id: number): ExpenseRecord | null {
-      return helpers.queryOne<ExpenseRecord>('SELECT * FROM expenses WHERE id = ?', [id])
+      return helpers.queryOne<ExpenseRecord>(`${EXPENSE_SELECT} WHERE e.id = ?`, [id])
     },
 
     createExpense(data: ExpenseInput): ExpenseRecord {
       const normalized = normalizeInput(data)
+      assertCarExists(helpers, normalized.car_id)
       const t = helpers.now()
 
       const id = helpers.runInsert(
-        `INSERT INTO expenses (title, category, amount, expense_date, payment_method, receipt_path, notes, created_at)
-         VALUES (?, ?, ?, ?, ?, '', ?, ?)`,
+        `INSERT INTO expenses (title, category, amount, expense_date, payment_method, receipt_path, notes, car_id, created_at)
+         VALUES (?, ?, ?, ?, ?, '', ?, ?, ?)`,
         [
           normalized.title,
           normalized.category,
@@ -189,6 +237,7 @@ export function createExpensesApi(helpers: DbHelpers) {
           normalized.expense_date,
           normalized.payment_method,
           normalized.notes,
+          normalized.car_id,
           t,
         ],
       )
@@ -208,6 +257,7 @@ export function createExpensesApi(helpers: DbHelpers) {
       if (!existing) throw new Error('EXPENSE_NOT_FOUND')
 
       const normalized = normalizeInput(data)
+      assertCarExists(helpers, normalized.car_id)
       let receipt_path = existing.receipt_path
 
       if (normalized.receipt_path && normalized.receipt_path !== existing.receipt_path) {
@@ -220,7 +270,7 @@ export function createExpensesApi(helpers: DbHelpers) {
 
       helpers.run(
         `UPDATE expenses SET title = ?, category = ?, amount = ?, expense_date = ?,
-         payment_method = ?, receipt_path = ?, notes = ? WHERE id = ?`,
+         payment_method = ?, receipt_path = ?, notes = ?, car_id = ? WHERE id = ?`,
         [
           normalized.title,
           normalized.category,
@@ -229,6 +279,7 @@ export function createExpensesApi(helpers: DbHelpers) {
           normalized.payment_method,
           receipt_path,
           normalized.notes,
+          normalized.car_id,
           id,
         ],
       )
@@ -249,49 +300,29 @@ export function createExpensesApi(helpers: DbHelpers) {
     },
 
     getExpenseStats(filters?: ExpenseFilters): ExpenseStats {
-      const clauses: string[] = []
-      const params: unknown[] = []
-
-      if (filters?.q?.trim()) {
-        clauses.push('(title LIKE ? OR notes LIKE ?)')
-        const q = `%${filters.q.trim()}%`
-        params.push(q, q)
-      }
-      if (filters?.category) {
-        clauses.push('category = ?')
-        params.push(filters.category)
-      }
-      if (filters?.date_from) {
-        clauses.push('expense_date >= ?')
-        params.push(filters.date_from)
-      }
-      if (filters?.date_to) {
-        clauses.push('expense_date <= ?')
-        params.push(filters.date_to)
-      }
-
-      const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
+      const { where, params } = buildExpenseWhere(filters)
       const month = new Date().toISOString().slice(0, 7)
 
       const totals = helpers.queryOne<{ total: number; count: number }>(
-        `SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM expenses ${where}`,
+        `SELECT COALESCE(SUM(e.amount), 0) as total, COUNT(*) as count
+         FROM expenses e ${where}`,
         params,
       )
 
-      const monthClauses = [...clauses, 'expense_date LIKE ?']
+      const monthClauses = where ? `${where} AND e.expense_date LIKE ?` : 'WHERE e.expense_date LIKE ?'
       const monthParams = [...params, `${month}%`]
-      const monthWhere = monthClauses.length ? `WHERE ${monthClauses.join(' AND ')}` : ''
 
       const monthTotals = helpers.queryOne<{ total: number; count: number }>(
-        `SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count FROM expenses ${monthWhere}`,
+        `SELECT COALESCE(SUM(e.amount), 0) as total, COUNT(*) as count
+         FROM expenses e ${monthClauses}`,
         monthParams,
       )
 
       const by_category = helpers
         .queryAll<{ category: string; amount: number }>(
-          `SELECT category, COALESCE(SUM(amount), 0) as amount
-           FROM expenses ${monthWhere}
-           GROUP BY category ORDER BY amount DESC`,
+          `SELECT e.category, COALESCE(SUM(e.amount), 0) as amount
+           FROM expenses e ${monthClauses}
+           GROUP BY e.category ORDER BY amount DESC`,
           monthParams,
         )
         .map((row) => ({ category: row.category, amount: row.amount }))
@@ -311,6 +342,7 @@ export function exportExpensesRows(expenses: ExpenseRecord[]) {
   return expenses.map((expense) => ({
     Titre: expense.title,
     Catégorie: CATEGORY_LABELS[expense.category] ?? expense.category,
+    Véhicule: expense.car_name ? `${expense.car_name} (${expense.car_plate ?? ''})` : 'Agence',
     Montant: expense.amount,
     Date: expense.expense_date,
     'Mode de paiement': METHOD_LABELS[expense.payment_method] ?? expense.payment_method,
