@@ -123,10 +123,44 @@ function getSettingsMap() {
   return settings
 }
 
+const DEFAULT_SETTINGS: Record<string, string> = {
+  company_name: 'Rental Car Agency',
+  company_phone: '',
+  company_whatsapp: '',
+  company_email: 'contact@rentalcaragency.ma',
+  company_address: '94 Rue Abderrahman El Majdoub, Hay Tarik 1',
+  company_city: 'Fès 30000, Maroc',
+  company_hours: 'Ouvert 24h/24, 7j/7',
+  company_about: 'Rental Car Agency est une agence de location de voitures basée à Fès, Maroc.',
+  company_fax: '',
+  company_tagline: 'Location de voitures',
+  company_logo: '',
+  company_ice: '',
+  company_rc: '',
+  company_if: '',
+  company_tp: '',
+  company_cnss: '',
+  default_franchise_amount: '0',
+  legal_mention_fr:
+    'Chaque dommage touche la société pendant la période de location ; le locataire sera exposé à la responsabilité administrative et judiciaire jusqu\'à la décision finale, ainsi qu\'au paiement de tous les frais résultants.',
+  legal_mention_ar: '',
+  currency: 'MAD',
+  language: 'fr',
+  notification_return_days: '1',
+  notification_doc_days: '30',
+}
+
 function ensureSetting(key: string, value: string) {
-  const existing = queryOne<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key])
-  if (!existing) {
-    run('INSERT INTO settings (key, value) VALUES (?, ?)', [key, value])
+  run(
+    `INSERT INTO settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO NOTHING`,
+    [key, value],
+  )
+}
+
+function applyDefaultSettings() {
+  for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
+    ensureSetting(key, value)
   }
 }
 
@@ -288,8 +322,10 @@ export async function initDb(userDataPath: string) {
   syncAllReservationPaymentStatuses(dbHelpers())
   syncAllCarStatuses(dbHelpers())
 
-  ensureSetting('notification_return_days', '1')
-  ensureSetting('notification_doc_days', '30')
+  const isFirstRun = !queryOne<{ key: string }>(
+    "SELECT key FROM settings WHERE key = 'company_name' LIMIT 1",
+  )
+  applyDefaultSettings()
 
   const orphanImages = queryAll<{ id: number; path: string; car_id: number }>(
     'SELECT id, path, car_id FROM car_images',
@@ -303,39 +339,7 @@ export async function initDb(userDataPath: string) {
     `DELETE FROM car_images WHERE car_id NOT IN (SELECT id FROM cars)`,
   )
 
-  const company = queryOne("SELECT value FROM settings WHERE key = 'company_name'")
-  if (!company) {
-    const defaults: Record<string, string> = {
-      company_name: 'Rental Car Agency',
-      company_phone: '',
-      company_whatsapp: '',
-      company_email: 'contact@rentalcaragency.ma',
-      company_address: '94 Rue Abderrahman El Majdoub, Hay Tarik 1',
-      company_city: 'Fès 30000, Maroc',
-      company_hours: 'Ouvert 24h/24, 7j/7',
-      company_about: 'Rental Car Agency est une agence de location de voitures basée à Fès, Maroc.',
-      company_fax: '',
-      company_tagline: 'Location de voitures',
-      company_logo: '',
-      company_ice: '',
-      company_rc: '',
-      company_if: '',
-      company_tp: '',
-      company_cnss: '',
-      default_franchise_amount: '0',
-      legal_mention_fr:
-        'Chaque dommage touche la société pendant la période de location ; le locataire sera exposé à la responsabilité administrative et judiciaire jusqu\'à la décision finale, ainsi qu\'au paiement de tous les frais résultants.',
-      legal_mention_ar: '',
-      currency: 'MAD',
-      language: 'fr',
-      notification_return_days: '1',
-      notification_doc_days: '30',
-    }
-    for (const [key, value] of Object.entries(defaults)) {
-      db.run('INSERT INTO settings (key, value) VALUES (?, ?)', [key, value])
-    }
-
-    // Demo seed data so the app is not empty on first launch
+  if (isFirstRun) {
     const t = now()
     const carCount = queryOne<{ c: number }>('SELECT COUNT(*) as c FROM cars')
     if ((carCount?.c ?? 0) === 0) {
@@ -379,16 +383,20 @@ export async function initDb(userDataPath: string) {
         is_available: false,
       })
     }
-    db.run(
-      `INSERT INTO customers (name, phone, email, cin_number, address, license_number, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ['Ahmed Benali', '0612345678', 'ahmed@email.com', 'AB123456', 'Casablanca', 'L-998877', t, t],
-    )
-    db.run(
-      `INSERT INTO customers (name, phone, email, cin_number, address, license_number, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ['Fatima Zahra', '0698765432', 'fatima@email.com', 'CD654321', 'Rabat', 'L-112233', t, t],
-    )
+
+    const customerCount = queryOne<{ c: number }>('SELECT COUNT(*) as c FROM customers')
+    if ((customerCount?.c ?? 0) === 0) {
+      db.run(
+        `INSERT INTO customers (name, phone, email, cin_number, address, license_number, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['Ahmed Benali', '0612345678', 'ahmed@email.com', 'AB123456', 'Casablanca', 'L-998877', t, t],
+      )
+      db.run(
+        `INSERT INTO customers (name, phone, email, cin_number, address, license_number, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['Fatima Zahra', '0698765432', 'fatima@email.com', 'CD654321', 'Rabat', 'L-112233', t, t],
+      )
+    }
     save()
   } else {
     save()
