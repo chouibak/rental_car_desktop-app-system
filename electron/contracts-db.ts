@@ -232,9 +232,100 @@ const MIGRATION_COLUMNS: Array<[string, string]> = [
   ['deleted_at', 'TEXT'],
 ]
 
+export function createContractsSchema(db: Database) {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS contracts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      contract_number TEXT NOT NULL UNIQUE,
+      reservation_id INTEGER,
+      client_id INTEGER,
+      car_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'draft',
+      deleted_at TEXT,
+      contract_date TEXT,
+      contract_city TEXT,
+      driver1_name TEXT DEFAULT '',
+      driver1_birth_date TEXT DEFAULT '',
+      driver1_birth_place TEXT DEFAULT '',
+      driver1_nationality TEXT DEFAULT '',
+      driver1_address TEXT DEFAULT '',
+      driver1_phone TEXT DEFAULT '',
+      driver1_passport_number TEXT DEFAULT '',
+      driver1_passport_issued_at TEXT DEFAULT '',
+      driver1_passport_expires_at TEXT DEFAULT '',
+      driver1_cin_number TEXT DEFAULT '',
+      driver1_cin_issued_at TEXT DEFAULT '',
+      driver1_cin_expires_at TEXT DEFAULT '',
+      driver1_license_number TEXT DEFAULT '',
+      driver1_license_issued_at TEXT DEFAULT '',
+      driver1_license_expires_at TEXT DEFAULT '',
+      driver2_name TEXT DEFAULT '',
+      driver2_birth_date TEXT DEFAULT '',
+      driver2_birth_place TEXT DEFAULT '',
+      driver2_nationality TEXT DEFAULT '',
+      driver2_address TEXT DEFAULT '',
+      driver2_phone TEXT DEFAULT '',
+      driver2_passport_number TEXT DEFAULT '',
+      driver2_passport_issued_at TEXT DEFAULT '',
+      driver2_passport_expires_at TEXT DEFAULT '',
+      driver2_cin_number TEXT DEFAULT '',
+      driver2_cin_issued_at TEXT DEFAULT '',
+      driver2_cin_expires_at TEXT DEFAULT '',
+      driver2_license_number TEXT DEFAULT '',
+      driver2_license_issued_at TEXT DEFAULT '',
+      driver2_license_expires_at TEXT DEFAULT '',
+      vehicle_brand TEXT DEFAULT '',
+      vehicle_model TEXT DEFAULT '',
+      vehicle_plate TEXT DEFAULT '',
+      departure_at TEXT DEFAULT '',
+      departure_place TEXT DEFAULT '',
+      departure_mileage INTEGER DEFAULT 0,
+      departure_fuel_level TEXT DEFAULT '',
+      return_at TEXT DEFAULT '',
+      return_place TEXT DEFAULT '',
+      return_mileage INTEGER DEFAULT 0,
+      return_fuel_level TEXT DEFAULT '',
+      billed_days INTEGER DEFAULT 0,
+      extension_until TEXT DEFAULT '',
+      extension_days INTEGER DEFAULT 0,
+      departure_notes TEXT DEFAULT '',
+      return_notes TEXT DEFAULT '',
+      equipment TEXT DEFAULT '',
+      equipment_other TEXT DEFAULT '',
+      departure_damages TEXT DEFAULT '[]',
+      return_damages TEXT DEFAULT '[]',
+      include_damage_photos_in_pdf INTEGER DEFAULT 1,
+      daily_rate REAL DEFAULT 0,
+      total_amount REAL DEFAULT 0,
+      deposit_amount REAL DEFAULT 0,
+      franchise_applies INTEGER DEFAULT 0,
+      franchise_amount REAL DEFAULT 0,
+      extra_charges REAL DEFAULT 0,
+      extra_charges_note TEXT DEFAULT '',
+      vat_applies INTEGER DEFAULT 1,
+      vat_rate REAL DEFAULT 20,
+      discount REAL DEFAULT 0,
+      delivered_at TEXT DEFAULT '',
+      closed_at TEXT DEFAULT '',
+      customer_signed_at TEXT DEFAULT '',
+      agency_signed_at TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      created_at TEXT,
+      updated_at TEXT,
+      start_date TEXT DEFAULT '',
+      end_date TEXT DEFAULT '',
+      daily_price REAL DEFAULT 0,
+      total_days INTEGER DEFAULT 0,
+      deposit REAL DEFAULT 0
+    )
+  `)
+}
+
 export function migrateContractsTable(db: Database, helpers: DbHelpers) {
+  createContractsSchema(db)
   const columns = helpers.queryAll<{ name: string }>('PRAGMA table_info(contracts)')
   const names = new Set(columns.map((c) => c.name))
+  if (names.size === 0) return
 
   for (const [col, type] of MIGRATION_COLUMNS) {
     if (!names.has(col)) {
@@ -242,16 +333,18 @@ export function migrateContractsTable(db: Database, helpers: DbHelpers) {
     }
   }
 
-  helpers.run(`
-    UPDATE contracts SET
-      departure_at = COALESCE(NULLIF(departure_at, ''), start_date),
-      return_at = COALESCE(NULLIF(return_at, ''), end_date),
-      billed_days = CASE WHEN billed_days IS NULL OR billed_days = 0 THEN total_days ELSE billed_days END,
-      daily_rate = CASE WHEN daily_rate IS NULL OR daily_rate = 0 THEN daily_price ELSE daily_rate END,
-      deposit_amount = CASE WHEN deposit_amount IS NULL OR deposit_amount = 0 THEN deposit ELSE deposit_amount END,
-      contract_date = COALESCE(NULLIF(contract_date, ''), date(start_date)),
-      driver1_name = COALESCE(NULLIF(driver1_name, ''), '')
-  `)
+  if (names.has('start_date')) {
+    helpers.run(`
+      UPDATE contracts SET
+        departure_at = COALESCE(NULLIF(departure_at, ''), start_date),
+        return_at = COALESCE(NULLIF(return_at, ''), end_date),
+        billed_days = CASE WHEN billed_days IS NULL OR billed_days = 0 THEN total_days ELSE billed_days END,
+        daily_rate = CASE WHEN daily_rate IS NULL OR daily_rate = 0 THEN daily_price ELSE daily_rate END,
+        deposit_amount = CASE WHEN deposit_amount IS NULL OR deposit_amount = 0 THEN deposit ELSE deposit_amount END,
+        contract_date = COALESCE(NULLIF(contract_date, ''), date(start_date)),
+        driver1_name = COALESCE(NULLIF(driver1_name, ''), '')
+    `)
+  }
 
   helpers.run(`UPDATE contracts SET status = 'closed' WHERE status = 'completed'`)
 }

@@ -193,6 +193,49 @@ const dbHelpers = () => ({
   now,
 })
 
+function createSupportSchema(db: Database) {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS clients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      full_name TEXT NOT NULL,
+      phone TEXT,
+      email TEXT,
+      cin TEXT,
+      address TEXT,
+      license_number TEXT,
+      notes TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS payments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      contract_id INTEGER NOT NULL,
+      amount REAL NOT NULL,
+      method TEXT NOT NULL DEFAULT 'cash',
+      paid_at TEXT NOT NULL,
+      note TEXT,
+      created_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS returns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      contract_id INTEGER NOT NULL UNIQUE,
+      returned_at TEXT NOT NULL,
+      mileage INTEGER,
+      fuel_level TEXT,
+      damages TEXT,
+      extra_fees REAL DEFAULT 0,
+      notes TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+  `)
+}
+
 export async function initDb(userDataPath: string) {
   const wasmPath = resolveSqlWasmPath()
   const SQL = await initSqlJs({
@@ -216,36 +259,34 @@ export async function initDb(userDataPath: string) {
   migrateCarsTable(db, dbHelpers())
   createCarsSchema(db)
   migrateCarStatusColumn(db, dbHelpers())
-  carsApi = createCarsApi(dbHelpers())
   createCustomersSchema(db)
   migrateCustomersTable(db, dbHelpers())
   migrateClientsToCustomers(db, dbHelpers())
-  customersApi = createCustomersApi(dbHelpers())
-
   createReservationsSchema(db)
-  reservationsApi = createReservationsApi(dbHelpers(), carsApi)
   createReservationPaymentsSchema(db)
-  syncAllReservationPaymentStatuses(dbHelpers())
-  syncAllCarStatuses(dbHelpers())
-  reservationPaymentsApi = createReservationPaymentsApi(dbHelpers())
-
+  createSupportSchema(db)
   migrateContractsTable(db, dbHelpers())
+  createExpensesSchema(db)
+  migrateExpensesTable(db, dbHelpers())
+  createChauffeursSchema(db)
+
+  carsApi = createCarsApi(dbHelpers())
+  customersApi = createCustomersApi(dbHelpers())
+  reservationsApi = createReservationsApi(dbHelpers(), carsApi)
+  reservationPaymentsApi = createReservationPaymentsApi(dbHelpers())
   contractsApi = createContractsApi(dbHelpers(), carsApi, () => {
     const rows = queryAll<{ key: string; value: string }>('SELECT key, value FROM settings')
     const settings: Record<string, string> = {}
     for (const row of rows) settings[row.key] = row.value
     return settings
   })
-
-  createExpensesSchema(db)
-  migrateExpensesTable(db, dbHelpers())
   expensesApi = createExpensesApi(dbHelpers())
-
-  createChauffeursSchema(db)
   chauffeursApi = createChauffeursApi(dbHelpers())
-
   revenueApi = createRevenueApi(dbHelpers())
   notificationsApi = createNotificationsApi(dbHelpers(), getSettingsMap)
+
+  syncAllReservationPaymentStatuses(dbHelpers())
+  syncAllCarStatuses(dbHelpers())
 
   ensureSetting('notification_return_days', '1')
   ensureSetting('notification_doc_days', '30')
@@ -261,69 +302,6 @@ export async function initDb(userDataPath: string) {
   run(
     `DELETE FROM car_images WHERE car_id NOT IN (SELECT id FROM cars)`,
   )
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS clients (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      full_name TEXT NOT NULL,
-      phone TEXT,
-      email TEXT,
-      cin TEXT,
-      address TEXT,
-      license_number TEXT,
-      notes TEXT,
-      created_at TEXT,
-      updated_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS contracts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      contract_number TEXT NOT NULL UNIQUE,
-      client_id INTEGER NOT NULL,
-      car_id INTEGER NOT NULL,
-      start_date TEXT NOT NULL,
-      end_date TEXT NOT NULL,
-      daily_price REAL NOT NULL,
-      total_days INTEGER NOT NULL,
-      discount REAL DEFAULT 0,
-      deposit REAL DEFAULT 0,
-      total_amount REAL NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active',
-      notes TEXT,
-      created_at TEXT,
-      updated_at TEXT,
-      FOREIGN KEY(client_id) REFERENCES clients(id),
-      FOREIGN KEY(car_id) REFERENCES cars(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS payments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      contract_id INTEGER NOT NULL,
-      amount REAL NOT NULL,
-      method TEXT NOT NULL DEFAULT 'cash',
-      paid_at TEXT NOT NULL,
-      note TEXT,
-      created_at TEXT,
-      FOREIGN KEY(contract_id) REFERENCES contracts(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS returns (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      contract_id INTEGER NOT NULL UNIQUE,
-      returned_at TEXT NOT NULL,
-      mileage INTEGER,
-      fuel_level TEXT,
-      damages TEXT,
-      extra_fees REAL DEFAULT 0,
-      notes TEXT,
-      FOREIGN KEY(contract_id) REFERENCES contracts(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT
-    );
-  `)
 
   const company = queryOne("SELECT value FROM settings WHERE key = 'company_name'")
   if (!company) {
