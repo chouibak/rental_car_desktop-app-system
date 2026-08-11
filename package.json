@@ -1,6 +1,6 @@
 {
   "name": "rental-car-crm",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "CRM de location de voitures — application bureau",
   "main": "dist-electron/main.js",
   "author": "LocAgence Pro",
@@ -22,6 +22,9 @@
       "dist/**/*",
       "dist-electron/**/*",
       "build/icon.ico"
+    ],
+    "asarUnpack": [
+      "node_modules/sql.js/**"
     ],
     "extraResources": [
       {

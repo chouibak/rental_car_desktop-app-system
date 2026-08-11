@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import { app } from 'electron'
 import initSqlJs, { Database } from 'sql.js'
 import {
   createCarsApi,
@@ -72,6 +73,36 @@ import { initSettingsStorage } from './settings-files'
 import { fileExists, initStorage } from './storage'
 
 const require = createRequire(__filename)
+
+function resolveSqlWasmPath(fileName = 'sql-wasm.wasm') {
+  const candidates: string[] = []
+
+  if (app.isPackaged) {
+    candidates.push(
+      path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'sql.js', 'dist', fileName),
+      path.join(process.resourcesPath, 'app', 'node_modules', 'sql.js', 'dist', fileName),
+    )
+  }
+
+  try {
+    candidates.push(path.join(path.dirname(require.resolve('sql.js/dist/sql-wasm.js')), fileName))
+  } catch {
+    /* dev fallback */
+  }
+
+  try {
+    const pkgDir = path.dirname(require.resolve('sql.js/package.json'))
+    candidates.push(path.join(pkgDir, 'dist', fileName), path.join(pkgDir, fileName))
+  } catch {
+    /* ignore */
+  }
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate
+  }
+
+  throw new Error(`sql.js WASM introuvable (${fileName})`)
+}
 
 let db: Database
 let dbPath = ''
@@ -163,7 +194,7 @@ const dbHelpers = () => ({
 })
 
 export async function initDb(userDataPath: string) {
-  const wasmPath = path.join(path.dirname(require.resolve('sql.js')), 'sql-wasm.wasm')
+  const wasmPath = resolveSqlWasmPath()
   const SQL = await initSqlJs({
     locateFile: () => wasmPath,
   })

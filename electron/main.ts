@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, net } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, protocol, net } from 'electron'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { initDb, getDbApi } from './db'
@@ -49,7 +49,13 @@ process.env.VITE_PUBLIC = app.isPackaged
   : path.join(process.env.DIST, '../public')
 
 let win: BrowserWindow | null = null
+let ipcRegistered = false
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) {
+  app.quit()
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -64,18 +70,25 @@ protocol.registerSchemesAsPrivileged([
   },
 ])
 
+function resolveWindowIcon() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'icon.ico')
+  }
+  return path.join(__dirname, '../build/icon.ico')
+}
+
 async function createWindow() {
   const userDataPath = app.getPath('userData')
   initLicense(userDataPath)
-  await initDb(userDataPath)
 
   win = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 1000,
     minHeight: 650,
+    show: false,
     title: 'LocAgence Pro',
-    icon: path.join(__dirname, '../build/icon.ico'),
+    icon: resolveWindowIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -83,14 +96,32 @@ async function createWindow() {
     },
   })
 
+  win.once('ready-to-show', () => {
+    win?.show()
+    win?.focus()
+  })
+
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+    dialog.showErrorBox(
+      'LocAgence Pro',
+      `Impossible de charger l'interface.\n\n${errorCode}: ${errorDescription}`,
+    )
+  })
+
+  await initDb(userDataPath)
+  registerIpc()
+
   if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL)
+    await win.loadURL(VITE_DEV_SERVER_URL)
   } else {
-    win.loadFile(path.join(process.env.DIST!, 'index.html'))
+    await win.loadFile(path.join(process.env.DIST!, 'index.html'))
   }
 }
 
 function registerIpc() {
+  if (ipcRegistered) return
+  ipcRegistered = true
+
   const api = getDbApi()
 
   const originalHandle = ipcMain.handle.bind(ipcMain)
@@ -222,7 +253,16 @@ function registerIpc() {
   })
 }
 
-app.whenReady().then(() => {
+app.on('second-instance', () => {
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+})
+
+app.whenReady().then(async () => {
+  if (!gotSingleInstanceLock) return
+
   protocol.handle('app-file', (request) => {
     const raw = request.url.replace(/^app-file:/i, '')
     const parsed = new URL(raw.startsWith('//') ? `file:${raw}` : `file://${raw}`)
@@ -233,8 +273,16 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(filePath).href)
   })
 
-  registerIpc()
-  createWindow()
+  try {
+    await createWindow()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    dialog.showErrorBox(
+      'LocAgence Pro',
+      `Impossible de démarrer l'application.\n\n${message}\n\nRéinstallez ou contactez le support.`,
+    )
+    app.quit()
+  }
 })
 
 app.on('window-all-closed', () => {
@@ -242,5 +290,11 @@ app.on('window-all-closed', () => {
 })
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error)
+      dialog.showErrorBox('LocAgence Pro', `Impossible de démarrer l'application.\n\n${message}`)
+      app.quit()
+    })
+  }
 })
