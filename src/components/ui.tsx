@@ -70,3 +70,5 @@ export function EmptyState({ message }: { message: string }) {
     </div>
   )
 }
+
+export { PasswordInput } from './PasswordInput'

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState, type ReactNode } from 'react'
 
-import { PageHeader } from '../components/ui'
+import { PageHeader, PasswordInput } from '../components/ui'
 
 import { useLang } from '../context/LangContext'
 import { useAuth } from '../context/AuthContext'
@@ -671,11 +671,7 @@ export default function SettingsPage() {
 
             <label>{t.authCurrentPassword}</label>
 
-            <input
-
-              className="input"
-
-              type="password"
+            <PasswordInput
 
               value={accountCurrentPassword}
 
@@ -691,11 +687,7 @@ export default function SettingsPage() {
 
             <label>{t.authNewPassword}</label>
 
-            <input
-
-              className="input"
-
-              type="password"
+            <PasswordInput
 
               value={accountNewPassword}
 
@@ -711,11 +703,7 @@ export default function SettingsPage() {
 
             <label>{t.authConfirmPassword}</label>
 
-            <input
-
-              className="input"
-
-              type="password"
+            <PasswordInput
 
               value={accountConfirmPassword}
 

@@ -3647,6 +3647,33 @@ th {
   height: 16px;
 }
 
+.password-input-wrap {
+  width: 100%;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  bottom: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  padding: 0;
+  border: none;
+  border-left: 1px solid var(--line);
+  border-radius: 0 10px 10px 0;
+  background: #f8fafc;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.password-toggle:hover {
+  color: var(--text);
+  background: #f1f5f9;
+}
+
 .sidebar-user {
   margin: 0 0 8px;
   font-size: 0.82rem;

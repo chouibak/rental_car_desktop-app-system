@@ -583,7 +583,6 @@ const fr = {
   authLogout: 'Déconnexion',
   authInvalidCredentials: 'Identifiant ou mot de passe incorrect.',
   authError: 'Connexion impossible. Réessayez.',
-  authDefaultHint: 'Première connexion : admin / admin123 — changez le mot de passe dans Paramètres.',
   authAccount: 'Compte utilisateur',
   authAccountHint: 'Modifiez votre identifiant et mot de passe de connexion.',
   authCurrentPassword: 'Mot de passe actuel',
@@ -597,6 +596,8 @@ const fr = {
   authPasswordMismatch: 'Les mots de passe ne correspondent pas.',
   authNoChanges: 'Aucune modification à enregistrer.',
   authLoggedInAs: 'Connecté : {user}',
+  showPassword: 'Afficher le mot de passe',
+  hidePassword: 'Masquer le mot de passe',
 
   whatsapp: 'WhatsApp',
   whatsappContract: 'Envoyer contrat',
@@ -1103,7 +1104,6 @@ const ar: typeof fr = {
   authLogout: 'تسجيل الخروج',
   authInvalidCredentials: 'اسم المستخدم أو كلمة المرور غير صحيحة.',
   authError: 'تعذر تسجيل الدخول. حاول مرة أخرى.',
-  authDefaultHint: 'أول دخول: admin / admin123 — غيّر كلمة المرور من الإعدادات.',
   authAccount: 'حساب المستخدم',
   authAccountHint: 'عدّل اسم المستخدم وكلمة المرور.',
   authCurrentPassword: 'كلمة المرور الحالية',
@@ -1117,6 +1117,8 @@ const ar: typeof fr = {
   authPasswordMismatch: 'كلمتا المرور غير متطابقتين.',
   authNoChanges: 'لا توجد تغييرات للحفظ.',
   authLoggedInAs: 'متصل: {user}',
+  showPassword: 'إظهار كلمة المرور',
+  hidePassword: 'إخفاء كلمة المرور',
 
   whatsapp: 'واتساب',
   whatsappContract: 'إرسال العقد',

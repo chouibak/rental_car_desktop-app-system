@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState, type ReactNode } from 'react'
 import { useLang } from '../context/LangContext'
 import { AuthProvider } from '../context/AuthContext'
+import { PasswordInput } from './PasswordInput'
 import type { AuthSession } from '../types'
 
 const REMEMBER_USERNAME_KEY = 'auth-remember-username'
@@ -102,10 +103,8 @@ export function AuthGate({ children }: Props) {
           />
 
           <label htmlFor="auth-password">{t.authPasswordLabel}</label>
-          <input
+          <PasswordInput
             id="auth-password"
-            className="input"
-            type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
@@ -130,8 +129,6 @@ export function AuthGate({ children }: Props) {
             {loading ? t.loading : t.authLogin}
           </button>
         </form>
-
-        <p className="license-footer muted-text">{t.authDefaultHint}</p>
       </div>
     </div>
   )
