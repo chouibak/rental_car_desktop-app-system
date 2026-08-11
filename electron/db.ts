@@ -3,6 +3,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { app } from 'electron'
 import initSqlJs, { Database } from 'sql.js'
+import { initAuth } from './auth'
 import {
   createCarsApi,
   createCarsSchema,
@@ -401,6 +402,8 @@ export async function initDb(userDataPath: string) {
   } else {
     save()
   }
+
+  initAuth(userDataPath, dbHelpers())
 }
 
 export type { CarInput, CarFilters } from './cars-db'

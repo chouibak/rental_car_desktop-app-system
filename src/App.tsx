@@ -17,6 +17,7 @@ import {
   IconWallet,
 } from './components/icons'
 import { useLang } from './context/LangContext'
+import { useAuth } from './context/AuthContext'
 import DashboardPage from './pages/DashboardPage'
 import CarDetailPage from './pages/CarDetailPage'
 import CarFormPage from './pages/CarFormPage'
@@ -65,6 +66,7 @@ function agencyInitials(name: string) {
 
 export default function App() {
   const { t, lang, setLang, dir } = useLang()
+  const { username, logout } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem('sidebar-open') !== 'false')
   const [agencyName, setAgencyName] = useState(t.appName)
   const [agencyLogoUrl, setAgencyLogoUrl] = useState('')
@@ -143,6 +145,10 @@ export default function App() {
         </nav>
 
         <div className="sidebar-footer">
+          <p className="sidebar-user muted-text">{t.authLoggedInAs.replace('{user}', username)}</p>
+          <button type="button" className="btn ghost sidebar-logout" onClick={() => logout()}>
+            {t.authLogout}
+          </button>
           <div className="lang-switch">
             <button type="button" className={lang === 'fr' ? 'active' : ''} onClick={() => setLang('fr')}>
               FR

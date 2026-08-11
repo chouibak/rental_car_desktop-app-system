@@ -533,6 +533,12 @@ export type LicenseStatus = {
   isTrial: boolean
 }
 
+export type AuthSession = {
+  authenticated: boolean
+  username: string | null
+  remember: boolean
+}
+
 declare global {
   interface Window {
     api: {
@@ -667,6 +673,18 @@ declare global {
       activateLicense: (
         key: string,
       ) => Promise<{ ok: true; status: LicenseStatus } | { ok: false; error: string }>
+      getAuthSession: () => Promise<AuthSession>
+      login: (input: {
+        username: string
+        password: string
+        remember?: boolean
+      }) => Promise<{ ok: true; session: AuthSession } | { ok: false; error: string }>
+      logout: () => Promise<AuthSession>
+      changeCredentials: (input: {
+        currentPassword: string
+        newUsername?: string
+        newPassword?: string
+      }) => Promise<{ ok: true; session: AuthSession } | { ok: false; error: string }>
       sendWhatsAppContract: (contractId: number) => Promise<{ ok: true } | { ok: false; error: string }>
       sendWhatsAppPaymentReminder: (
         reservationId: number,

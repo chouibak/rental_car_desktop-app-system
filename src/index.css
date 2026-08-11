@@ -3633,6 +3633,39 @@ th {
   font-size: 0.85rem;
 }
 
+.auth-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.92rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.auth-remember input {
+  width: 16px;
+  height: 16px;
+}
+
+.sidebar-user {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.sidebar-logout {
+  width: 100%;
+  margin-bottom: 10px;
+  justify-content: center;
+}
+
+.settings-account-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .license-trial-dashboard {
   display: flex;
   align-items: center;

@@ -4,6 +4,7 @@ import { HashRouter } from 'react-router-dom'
 import App from './App'
 import { LangProvider } from './context/LangContext'
 import { LicenseGate } from './components/LicenseGate'
+import { AuthGate } from './components/AuthGate'
 import './index.css'
 import './types'
 
@@ -12,7 +13,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <LangProvider>
       <HashRouter>
         <LicenseGate>
-          <App />
+          <AuthGate>
+            <App />
+          </AuthGate>
         </LicenseGate>
       </HashRouter>
     </LangProvider>

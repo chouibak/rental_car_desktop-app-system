@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useState, type ReactNode } from 'react'
 import { PageHeader } from '../components/ui'
 
 import { useLang } from '../context/LangContext'
+import { useAuth } from '../context/AuthContext'
 
 import type { Lang } from '../types'
 
@@ -141,16 +142,26 @@ function SettingsSection({ title, hint, children }: { title: string; hint?: stri
 export default function SettingsPage() {
 
   const { t, lang, setLang } = useLang()
+  const { username } = useAuth()
 
   const [form, setForm] = useState<SettingsForm>(EMPTY_FORM)
-
   const [logoPreview, setLogoPreview] = useState('')
-
   const [saved, setSaved] = useState(false)
-
   const [error, setError] = useState('')
 
+  const [accountCurrentPassword, setAccountCurrentPassword] = useState('')
+  const [accountNewUsername, setAccountNewUsername] = useState('')
+  const [accountNewPassword, setAccountNewPassword] = useState('')
+  const [accountConfirmPassword, setAccountConfirmPassword] = useState('')
+  const [accountSaved, setAccountSaved] = useState(false)
+  const [accountError, setAccountError] = useState('')
+  const [accountLoading, setAccountLoading] = useState(false)
 
+
+
+  useEffect(() => {
+    setAccountNewUsername(username)
+  }, [username])
 
   useEffect(() => {
     window.api.getSettings().then(async (s) => {
@@ -237,6 +248,80 @@ export default function SettingsPage() {
     update('company_logo', '')
 
     setLogoPreview('')
+
+  }
+
+
+
+  const onAccountSubmit = async (e: FormEvent) => {
+
+    e.preventDefault()
+
+    setAccountError('')
+
+    setAccountLoading(true)
+
+    try {
+
+      if (accountNewPassword && accountNewPassword !== accountConfirmPassword) {
+
+        setAccountError(t.authPasswordMismatch)
+
+        return
+
+      }
+
+      const result = await window.api.changeCredentials({
+
+        currentPassword: accountCurrentPassword,
+
+        newUsername: accountNewUsername.trim() !== username ? accountNewUsername.trim() : undefined,
+
+        newPassword: accountNewPassword || undefined,
+
+      })
+
+      if (result.ok) {
+
+        window.dispatchEvent(new CustomEvent('auth-updated', { detail: result.session }))
+
+        setAccountCurrentPassword('')
+
+        setAccountNewPassword('')
+
+        setAccountConfirmPassword('')
+
+        setAccountSaved(true)
+
+        setTimeout(() => setAccountSaved(false), 2000)
+
+      } else {
+
+        const messages: Record<string, string> = {
+
+          INVALID_PASSWORD: t.authInvalidPassword,
+
+          WEAK_PASSWORD: t.authWeakPassword,
+
+          NO_CHANGES: t.authNoChanges,
+
+          INVALID_USERNAME: t.requiredField,
+
+        }
+
+        setAccountError(messages[result.error] || t.authError)
+
+      }
+
+    } catch {
+
+      setAccountError(t.authError)
+
+    } finally {
+
+      setAccountLoading(false)
+
+    }
 
   }
 
@@ -555,6 +640,114 @@ export default function SettingsPage() {
               onChange={(e) => update('notification_doc_days', e.target.value)}
 
             />
+
+          </div>
+
+        </SettingsSection>
+
+
+
+        <SettingsSection title={t.authAccount} hint={t.authAccountHint}>
+
+          <div className="field">
+
+            <label>{t.authUsernameLabel}</label>
+
+            <input
+
+              className="input"
+
+              value={accountNewUsername}
+
+              onChange={(e) => setAccountNewUsername(e.target.value)}
+
+              autoComplete="username"
+
+            />
+
+          </div>
+
+          <div className="field">
+
+            <label>{t.authCurrentPassword}</label>
+
+            <input
+
+              className="input"
+
+              type="password"
+
+              value={accountCurrentPassword}
+
+              onChange={(e) => setAccountCurrentPassword(e.target.value)}
+
+              autoComplete="current-password"
+
+            />
+
+          </div>
+
+          <div className="field">
+
+            <label>{t.authNewPassword}</label>
+
+            <input
+
+              className="input"
+
+              type="password"
+
+              value={accountNewPassword}
+
+              onChange={(e) => setAccountNewPassword(e.target.value)}
+
+              autoComplete="new-password"
+
+            />
+
+          </div>
+
+          <div className="field">
+
+            <label>{t.authConfirmPassword}</label>
+
+            <input
+
+              className="input"
+
+              type="password"
+
+              value={accountConfirmPassword}
+
+              onChange={(e) => setAccountConfirmPassword(e.target.value)}
+
+              autoComplete="new-password"
+
+            />
+
+          </div>
+
+          <div className="field full settings-account-actions">
+
+            <button
+
+              type="button"
+
+              className="btn secondary"
+
+              disabled={accountLoading || !accountCurrentPassword}
+
+              onClick={onAccountSubmit}
+
+            >
+
+              {accountLoading ? t.loading : t.authChangeCredentials}
+
+            </button>
+
+            {accountSaved ? <span className="settings-saved">{t.authCredentialsUpdated}</span> : null}
+
+            {accountError ? <span className="settings-error">{accountError}</span> : null}
 
           </div>
 

@@ -38,6 +38,14 @@ import {
   isLicenseChannel,
 } from './license'
 import {
+  assertAuthenticated,
+  changeCredentials,
+  getSession,
+  isAuthExemptChannel,
+  login,
+  logout,
+} from './auth'
+import {
   sendWhatsAppContract,
   sendWhatsAppPaymentReminder,
   sendWhatsAppReturnReminder,
@@ -126,17 +134,29 @@ function registerIpc() {
 
   const originalHandle = ipcMain.handle.bind(ipcMain)
   ipcMain.handle = ((channel: string, handler: Parameters<typeof ipcMain.handle>[1]) => {
-    if (isLicenseChannel(channel)) {
+    if (isLicenseChannel(channel) || isAuthExemptChannel(channel)) {
       return originalHandle(channel, handler)
     }
     return originalHandle(channel, async (event, ...args) => {
       assertLicenseValid()
+      assertAuthenticated()
       return handler(event, ...args)
     })
   }) as typeof ipcMain.handle
 
   ipcMain.handle('license:status', () => getLicenseStatus())
   ipcMain.handle('license:activate', (_e, key: string) => activateLicense(key))
+
+  ipcMain.handle('auth:session', () => getSession())
+  ipcMain.handle('auth:login', (_e, input: { username: string; password: string; remember?: boolean }) =>
+    login(input.username, input.password, Boolean(input.remember)),
+  )
+  ipcMain.handle('auth:logout', () => logout())
+  ipcMain.handle(
+    'auth:changeCredentials',
+    (_e, input: { currentPassword: string; newUsername?: string; newPassword?: string }) =>
+      changeCredentials(input),
+  )
 
   ipcMain.handle('whatsapp:contract', (_e, contractId: number) => sendWhatsAppContract(contractId))
   ipcMain.handle('whatsapp:paymentReminder', (_e, reservationId: number) =>

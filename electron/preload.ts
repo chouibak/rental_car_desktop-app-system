@@ -104,6 +104,13 @@ const api = {
   getLicenseStatus: () => ipcRenderer.invoke('license:status'),
   activateLicense: (key: string) => ipcRenderer.invoke('license:activate', key),
 
+  getAuthSession: () => ipcRenderer.invoke('auth:session'),
+  login: (input: { username: string; password: string; remember?: boolean }) =>
+    ipcRenderer.invoke('auth:login', input),
+  logout: () => ipcRenderer.invoke('auth:logout'),
+  changeCredentials: (input: { currentPassword: string; newUsername?: string; newPassword?: string }) =>
+    ipcRenderer.invoke('auth:changeCredentials', input),
+
   sendWhatsAppContract: (contractId: number) => ipcRenderer.invoke('whatsapp:contract', contractId),
   sendWhatsAppPaymentReminder: (reservationId: number) =>
     ipcRenderer.invoke('whatsapp:paymentReminder', reservationId),
