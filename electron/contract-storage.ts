@@ -9,6 +9,8 @@ export function initContractStorage(userDataPath: string) {
   contractStorageRoot = path.join(userDataPath, 'storage', 'contracts')
   fs.mkdirSync(path.join(contractStorageRoot, 'damages', 'departure'), { recursive: true })
   fs.mkdirSync(path.join(contractStorageRoot, 'damages', 'return'), { recursive: true })
+  fs.mkdirSync(path.join(contractStorageRoot, 'damages', 'videos', 'departure'), { recursive: true })
+  fs.mkdirSync(path.join(contractStorageRoot, 'damages', 'videos', 'return'), { recursive: true })
   fs.mkdirSync(path.join(contractStorageRoot, 'pdf'), { recursive: true })
 }
 
@@ -19,6 +21,15 @@ export function getContractStorageRoot() {
 export function copyDamagePhoto(sourcePath: string, kind: 'departure' | 'return') {
   const ext = path.extname(sourcePath) || '.jpg'
   const dir = path.join(contractStorageRoot, 'damages', kind)
+  fs.mkdirSync(dir, { recursive: true })
+  const dest = path.join(dir, `${randomUUID()}${ext}`)
+  fs.copyFileSync(sourcePath, dest)
+  return dest
+}
+
+export function copyDamageVideo(sourcePath: string, kind: 'departure' | 'return') {
+  const ext = path.extname(sourcePath) || '.mp4'
+  const dir = path.join(contractStorageRoot, 'damages', 'videos', kind)
   fs.mkdirSync(dir, { recursive: true })
   const dest = path.join(dir, `${randomUUID()}${ext}`)
   fs.copyFileSync(sourcePath, dest)

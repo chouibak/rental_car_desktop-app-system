@@ -1,4 +1,4 @@
-export const CONTRACT_STATUSES = ['draft', 'active', 'closed', 'cancelled'] as const
+export const CONTRACT_STATUSES = ['active', 'draft', 'closed', 'cancelled'] as const
 
 export const FUEL_LEVELS = ['vide', 'quart', 'moitie', 'trois_quarts', 'plein'] as const
 
@@ -39,6 +39,7 @@ export type ContractDamage = {
   type: string
   note: string
   photo?: string
+  video?: string
 }
 
 export function parseEquipment(value: unknown): string[] {
@@ -75,6 +76,13 @@ export function toLocalDatetimeValue(iso?: string) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+export function toIsoDatetime(value?: string) {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toISOString()
+}
+
 export function calcContractTotal(billedDays: number, dailyRate: number, discount = 0, extraCharges = 0) {
   return Math.max(0, billedDays * dailyRate - discount + extraCharges)
 }
@@ -84,6 +92,67 @@ export function calcBilledDays(departure: string, returnDate: string) {
   const end = new Date(returnDate)
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return 1
   return Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
+}
+
+/** Add (or subtract) whole calendar days; returns ISO string like backend addDaysIso. */
+export function addDaysToIso(iso: string, days: number) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  d.setDate(d.getDate() + days)
+  return d.toISOString()
+}
+
+/** Original return before prolongation. Prefers stored original_return_at. */
+export function getBaseReturnAt(
+  returnAt: string,
+  extensionDays: number,
+  originalReturnAt?: string | null,
+) {
+  if (originalReturnAt?.trim()) return originalReturnAt
+  const days = Math.max(0, Math.floor(Number(extensionDays) || 0))
+  if (!returnAt || days <= 0) return returnAt
+  return addDaysToIso(returnAt, -days)
+}
+
+/** Rental total before prolongation (fees/discount already included). */
+export function getOriginalRentalTotal(
+  totalAmount: number,
+  extensionDays: number,
+  dailyRate: number,
+  storedOriginalTotal?: number | null,
+) {
+  const stored = Number(storedOriginalTotal ?? 0)
+  if (stored > 0) return stored
+  const ext = Math.max(0, Math.floor(Number(extensionDays) || 0))
+  if (ext <= 0) return totalAmount
+  return Math.max(0, totalAmount - ext * dailyRate)
+}
+
+export function calcExtensionPreview(input: {
+  originalReturnAt: string
+  originalTotal: number
+  extensionDays: number
+  dailyRate: number
+  departure?: string
+  paid?: number
+}) {
+  const extensionDays = Math.max(0, Math.floor(Number(input.extensionDays) || 0))
+  const extensionCost = extensionDays * input.dailyRate
+  const newTotal = Math.max(0, input.originalTotal + extensionCost)
+  const newReturnAt =
+    extensionDays === 0 ? input.originalReturnAt : addDaysToIso(input.originalReturnAt, extensionDays)
+  const newBilledDays =
+    input.departure && newReturnAt ? calcBilledDays(input.departure, newReturnAt) : 0
+  const paid = input.paid ?? 0
+  return {
+    extensionDays,
+    extensionCost,
+    newTotal,
+    newReturnAt,
+    newBilledDays,
+    newRemaining: Math.max(0, newTotal - paid),
+    originalTotal: input.originalTotal,
+  }
 }
 
 export function formatContractDatetime(value: string) {
@@ -145,4 +214,24 @@ export function chauffeurToDriver1Fields(chauffeur: Parameters<typeof personToDr
 
 export function chauffeurToDriver2Fields(chauffeur: Parameters<typeof personToDriverFields>[1]) {
   return personToDriverFields('driver2', chauffeur)
+}
+
+export function emptyDriver2Fields() {
+  return personToDriverFields('driver2', {
+    name: '',
+    birth_date: '',
+    birth_place: '',
+    nationality: '',
+    address: '',
+    phone: '',
+    passport_number: '',
+    passport_issue_date: '',
+    passport_expiry_date: '',
+    cin_number: '',
+    cin_issue_date: '',
+    cin_expiry_date: '',
+    license_number: '',
+    license_issue_date: '',
+    license_expiry_date: '',
+  })
 }

@@ -47,10 +47,6 @@ export function LicenseTrialProvider({ children }: { children: ReactNode }) {
   return <LicenseTrialContext.Provider value={status}>{children}</LicenseTrialContext.Provider>
 }
 
-function useTrialStatus() {
-  return useContext(LicenseTrialContext)
-}
-
 function isUrgent(status: LicenseStatus) {
   if (status.type === 'trial_5min') return (status.minutesRemaining ?? 0) <= 2
   return (status.daysRemaining ?? 0) <= 2
@@ -58,25 +54,22 @@ function isUrgent(status: LicenseStatus) {
 
 export function LicenseTrialDashboard() {
   const { t } = useLang()
-  const status = useTrialStatus()
+  const status = useContext(LicenseTrialContext)
 
   if (!status?.isTrial || !status.valid) return null
 
   const label = formatTrialRemaining(status, t)
 
   return (
-    <div className={`license-trial-dashboard${isUrgent(status) ? ' license-trial-dashboard--urgent' : ''}`}>
-      <div className="license-trial-dashboard-main">
+    <div className={`license-trial-header${isUrgent(status) ? ' license-trial-header--urgent' : ''}`}>
+      <div className="license-trial-header-row">
         <span className="license-trial-label">{t.licenseTrialBadge}</span>
         <strong>{label}</strong>
       </div>
       {status.expiresAt ? (
-        <span className="license-trial-date muted-text">
+        <span className="license-trial-date">
           {t.licenseExpiresOn}{' '}
-          {new Date(status.expiresAt).toLocaleString(undefined, {
-            dateStyle: 'short',
-            timeStyle: status.type === 'trial_5min' ? 'short' : undefined,
-          })}
+          {new Date(status.expiresAt).toLocaleDateString(undefined, { dateStyle: 'short' })}
         </span>
       ) : null}
     </div>

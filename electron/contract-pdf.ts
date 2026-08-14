@@ -1,8 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import PDFDocument from 'pdfkit'
+import { PDFDocument as PdfLibDocument } from 'pdf-lib'
 import type { ContractRecord } from './contracts-db'
-import { CAR_DIAGRAM_B64 } from './car-diagram-base64'
 
 type DamageItem = { part: string; type: string; note: string; photo?: string }
 
@@ -13,8 +13,10 @@ type InvoiceBreakdown = {
   lines: Array<{ label: string; amount: number }>
 }
 
-const PAGE = { w: 595.28, h: 841.89, m: 20 }
+const PAGE = { w: 595.28, h: 841.89, m: 22 }
 const CONTENT_W = PAGE.w - PAGE.m * 2
+const SECTION_GAP = 10
+const COL_GAP = 6
 
 function footerIdValue(value?: string) {
   const text = String(value ?? '').trim()
@@ -22,14 +24,14 @@ function footerIdValue(value?: string) {
 }
 
 const PART_POSITIONS: Record<string, { x: number; y: number }> = {
-  front: { x: 0.5, y: 0.2 },
-  windshield: { x: 0.5, y: 0.3 },
+  front: { x: 0.2, y: 0.5 },
+  windshield: { x: 0.32, y: 0.5 },
   roof: { x: 0.5, y: 0.5 },
-  left_side: { x: 0.15, y: 0.5 },
-  right_side: { x: 0.85, y: 0.5 },
-  rear: { x: 0.5, y: 0.8 },
-  wheels: { x: 0.12, y: 0.75 },
-  interior: { x: 0.5, y: 0.6 },
+  left_side: { x: 0.5, y: 0.8 },
+  right_side: { x: 0.5, y: 0.2 },
+  rear: { x: 0.82, y: 0.5 },
+  wheels: { x: 0.22, y: 0.88 },
+  interior: { x: 0.5, y: 0.5 },
 }
 
 const PART_LABELS: Record<string, string> = {
@@ -140,6 +142,70 @@ function drawCheckbox(doc: InstanceType<typeof PDFDocument>, x: number, y: numbe
   doc.font('Helvetica').fontSize(7).fillColor('#111').text(label, x + 12, y + 1.5, { width: labelWidth, lineBreak: false })
 }
 
+function drawCleanCarOutline(
+  doc: InstanceType<typeof PDFDocument>,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+) {
+  const srcW = 230
+  const srcH = 100
+  const scale = Math.min(w / srcW, h / srcH)
+  const ox = x + (w - srcW * scale) / 2
+  const oy = y + (h - srcH * scale) / 2
+  const X = (u: number) => ox + u * scale
+  const Y = (v: number) => oy + v * scale
+  const S = (n: number) => n * scale
+
+  doc.save()
+  doc.lineWidth(Math.max(0.7, S(0.85)))
+  doc.strokeColor('#222')
+  doc.fillColor('#222')
+  doc.lineJoin('round')
+  doc.lineCap('round')
+
+  const wheel = (cx: number, cy: number) => {
+    doc.ellipse(X(cx), Y(cy), S(11), S(7.2)).stroke()
+    doc.ellipse(X(cx), Y(cy), S(6.2), S(3.8)).stroke()
+  }
+  wheel(50, 14)
+  wheel(50, 86)
+  wheel(180, 14)
+  wheel(180, 86)
+
+  doc.roundedRect(X(28), Y(22), S(174), S(56), S(10)).stroke()
+
+  doc.ellipse(X(32), Y(36), S(3.1), S(5.4)).stroke()
+  doc.ellipse(X(32), Y(64), S(3.1), S(5.4)).stroke()
+  doc.ellipse(X(198), Y(36), S(2.5), S(4.8)).stroke()
+  doc.ellipse(X(198), Y(64), S(2.5), S(4.8)).stroke()
+
+  doc.moveTo(X(60), Y(26)).lineTo(X(60), Y(74)).stroke()
+  doc.moveTo(X(60), Y(26)).lineTo(X(82), Y(33)).lineTo(X(82), Y(67)).lineTo(X(60), Y(74)).closePath().stroke()
+  doc.moveTo(X(148), Y(33)).lineTo(X(170), Y(26)).lineTo(X(170), Y(74)).lineTo(X(148), Y(67)).closePath().stroke()
+  doc.moveTo(X(82), Y(33)).lineTo(X(148), Y(33)).stroke()
+  doc.moveTo(X(82), Y(67)).lineTo(X(148), Y(67)).stroke()
+  doc.moveTo(X(115), Y(22)).lineTo(X(115), Y(78)).stroke()
+
+  doc.ellipse(X(76), Y(18), S(6.2), S(3.1)).stroke()
+  doc.ellipse(X(76), Y(82), S(6.2), S(3.1)).stroke()
+
+  const handle = (hx: number, hy: number) => {
+    doc.roundedRect(X(hx), Y(hy), S(7), S(2.1), S(0.8)).stroke()
+  }
+  handle(94, 29.2)
+  handle(126, 29.2)
+  handle(94, 68.7)
+  handle(126, 68.7)
+
+  doc.font('Helvetica').fontSize(Math.max(4.2, S(5.5)))
+  doc.text('AVANT', X(1), Y(46), { width: S(26), align: 'center', lineBreak: false })
+  doc.restore()
+
+  return { ox, oy, dw: srcW * scale, dh: srcH * scale }
+}
+
 function drawCarDiagram(
   doc: InstanceType<typeof PDFDocument>,
   x: number,
@@ -148,26 +214,16 @@ function drawCarDiagram(
   h: number,
   damages: DamageItem[],
 ) {
-  const bodyX = x + w * 0.22
-  const bodyY = y + 4
-  const bodyW = w * 0.56
-  const bodyH = h - 8
+  const box = drawCleanCarOutline(doc, x, y, w, h)
 
   doc.save()
-
-  // Draw actual car image
-  const imgBuffer = Buffer.from(CAR_DIAGRAM_B64, 'base64')
-  doc.image(imgBuffer, bodyX, bodyY, { width: bodyW, height: bodyH })
-
-  // Draw damages
   doc.font('Helvetica-Bold').fontSize(7).fillColor('#c0392b')
   for (const damage of damages) {
     const pos = PART_POSITIONS[damage.part] || { x: 0.5, y: 0.5 }
-    const mx = bodyX + bodyW * pos.x - 4
-    const my = bodyY + bodyH * pos.y - 4
+    const mx = box.ox + box.dw * pos.x - 4
+    const my = box.oy + box.dh * pos.y - 4
     doc.text(damage.type, mx, my, { width: 12, align: 'center' })
   }
-
   doc.restore()
 }
 
@@ -267,12 +323,14 @@ function drawHeader(
 
 function drawDrivers(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, contract: ContractRecord) {
   const h = 126
-  strokeBox(doc, x, y, w, h)
-  const w2 = w / 2
-  doc.moveTo(x + w2, y).lineTo(x + w2, y + h).stroke('#222')
+  const w2 = (w - COL_GAP) / 2
+  const rightX = x + w2 + COL_GAP
+
+  strokeBox(doc, x, y, w2, h)
+  strokeBox(doc, rightX, y, w2, h)
 
   sectionBar(doc, x, y, w2, '1er Conducteur')
-  sectionBar(doc, x + w2, y, w2, '2ème Conducteur')
+  sectionBar(doc, rightX, y, w2, '2ème Conducteur')
 
   const innerY = y + 18
   const lineH = 13
@@ -315,19 +373,21 @@ function drawDrivers(doc: InstanceType<typeof PDFDocument>, x: number, y: number
   }
 
   drawHalf(x, 'driver1_')
-  drawHalf(x + w2, 'driver2_')
+  drawHalf(rightX, 'driver2_')
   return h
 }
 
 function drawVehicleEquipment(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, contract: ContractRecord) {
   const h = 105
-  strokeBox(doc, x, y, w, h)
-  const leftW = w * 0.55
-  const rightW = w - leftW
-  doc.moveTo(x + leftW, y).lineTo(x + leftW, y + h).stroke('#222')
+  const leftW = (w - COL_GAP) * 0.55
+  const rightW = w - COL_GAP - leftW
+  const rightX = x + leftW + COL_GAP
+
+  strokeBox(doc, x, y, leftW, h)
+  strokeBox(doc, rightX, y, rightW, h)
 
   sectionBar(doc, x, y, leftW, 'Description du véhicule')
-  sectionBar(doc, x + leftW, y, rightW, 'Équipements et accessoires')
+  sectionBar(doc, rightX, y, rightW, 'Équipements et accessoires')
 
   const innerY = y + 18
   const lineH = 12
@@ -360,7 +420,7 @@ function drawVehicleEquipment(doc: InstanceType<typeof PDFDocument>, x: number, 
 
   // Equipments — fixed column widths to prevent label/checkbox overlap
   const equipment = parseJsonArray<string>(contract.equipment)
-  const equipX = x + leftW + 6
+  const equipX = rightX + 6
   const equipRowH = 15
   const equipRows: Array<Array<{ key: string; label: string; slotW: number; labelW: number }>> = [
     [
@@ -388,7 +448,7 @@ function drawVehicleEquipment(doc: InstanceType<typeof PDFDocument>, x: number, 
 
   const autresY = innerY + 2 * equipRowH + 4
   drawCheckbox(doc, equipX, autresY, !!contract.equipment_other, 'Autres', 30)
-  doc.moveTo(equipX + 50, autresY + 8).lineTo(x + w - 8, autresY + 8).stroke('#aaa')
+  doc.moveTo(equipX + 50, autresY + 8).lineTo(rightX + rightW - 8, autresY + 8).stroke('#aaa')
   if (contract.equipment_other) {
     doc.font('Helvetica').fontSize(7).fillColor('#111').text(contract.equipment_other, equipX + 52, autresY, { width: rightW - 58, lineBreak: false })
   }
@@ -436,8 +496,8 @@ function drawDamagePhotoGrid(
 }
 
 function drawVehicleState(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, contract: ContractRecord) {
-  const baseH = 100
-  const includePhotos = contract.include_damage_photos_in_pdf === 1
+  const baseH = 108
+  const includePhotos = Number(contract.include_damage_photos_in_pdf) === 1
   const departureDamages = parseJsonArray<DamageItem>(contract.departure_damages)
   const returnDamages = parseJsonArray<DamageItem>(contract.return_damages)
   const departurePhotos = includePhotos ? damagePhotoItems(departureDamages) : []
@@ -445,19 +505,20 @@ function drawVehicleState(doc: InstanceType<typeof PDFDocument>, x: number, y: n
   const photoRows = Math.max(photoGridRows(departurePhotos.length), photoGridRows(returnPhotos.length))
   const photoBlockH = photoRows > 0 ? photoRows * PHOTO_CELL_H + 4 : 0
   const h = baseH + photoBlockH
+  const w2 = (w - COL_GAP) / 2
+  const rightX = x + w2 + COL_GAP
 
-  strokeBox(doc, x, y, w, h)
-  const w2 = w / 2
-  doc.moveTo(x + w2, y).lineTo(x + w2, y + h).stroke('#222')
+  strokeBox(doc, x, y, w2, h)
+  strokeBox(doc, rightX, y, w2, h)
 
   sectionBar(doc, x, y, w2, 'État du véhicule à la livraison')
-  sectionBar(doc, x + w2, y, w2, 'État du véhicule à la reprise')
+  sectionBar(doc, rightX, y, w2, 'État du véhicule à la reprise')
 
   ;[
-    { damages: departureDamages, fuel: contract.departure_fuel_level || '' },
-    { damages: returnDamages, fuel: contract.return_fuel_level || '' },
-  ].forEach((block, index) => {
-    const bx = x + index * w2
+    { damages: departureDamages, fuel: contract.departure_fuel_level || '', bx: x },
+    { damages: returnDamages, fuel: contract.return_fuel_level || '', bx: rightX },
+  ].forEach((block) => {
+    const bx = block.bx
 
     const legY = y + 20
     doc.font('Helvetica-Bold').fontSize(5.5).fillColor('#111')
@@ -466,21 +527,22 @@ function drawVehicleState(doc: InstanceType<typeof PDFDocument>, x: number, y: n
     doc.text('E - Éclat', bx + 6, legY + 20)
     doc.text('C - Cassure', bx + 6, legY + 30)
 
-    drawCarDiagram(doc, bx + 50, y + 16, w2 - 60, baseH - 42, block.damages)
-    drawFuelGauge(doc, bx + 6, y + baseH - 28, w2 - 12, block.fuel)
+    drawCarDiagram(doc, bx + 46, y + 14, w2 - 54, baseH - 42, block.damages)
+    drawFuelGauge(doc, bx + 6, y + baseH - 26, w2 - 12, block.fuel)
   })
 
   if (photoBlockH > 0) {
     const photoY = y + baseH
-    doc.moveTo(x, photoY).lineTo(x + w, photoY).stroke('#222')
+    doc.moveTo(x, photoY).lineTo(x + w2, photoY).stroke('#222')
+    doc.moveTo(rightX, photoY).lineTo(rightX + w2, photoY).stroke('#222')
     if (departurePhotos.length > 0) drawDamagePhotoGrid(doc, x, photoY + 3, w2, departurePhotos)
-    if (returnPhotos.length > 0) drawDamagePhotoGrid(doc, x + w2, photoY + 3, w2, returnPhotos)
+    if (returnPhotos.length > 0) drawDamagePhotoGrid(doc, rightX, photoY + 3, w2, returnPhotos)
   }
 
   return h
 }
 
-function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, contract: ContractRecord & { client_name?: string }, breakdown: InvoiceBreakdown) {
+function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, contract: ContractRecord & { client_name?: string; paid_amount?: number }, breakdown: InvoiceBreakdown) {
   const cols = [
     w * 0.40, // Désignation
     w * 0.05, // Qté
@@ -495,64 +557,72 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
   const tableHeadH = 14
   const rowH = 16
   const summaryH = 14
+  const vatApplies = Number(contract.vat_applies) === 1
+  const vatRate = vatApplies ? Number(contract.vat_rate ?? 0) : 0
+  const qty = contract.billed_days || 1
+  const vehicleLabel = `${contract.vehicle_brand || ''} ${contract.vehicle_model || ''}`.trim()
+  const lines = breakdown.lines.length > 0 ? breakdown.lines : [{ label: 'Location', amount: qty * (contract.daily_rate ?? 0) }]
+  const tableRowsH = rowH * lines.length
+  const topBoxH = 14 + headerH + tableHeadH + tableRowsH
 
-  // Main bounding box for Facture header + table headers + table row
-  const topBoxH = 14 + headerH + tableHeadH + rowH
   strokeBox(doc, x, y, w, topBoxH)
-
   sectionBar(doc, x, y, w, 'Facture')
 
-  // Info line
   const infoY = y + 14
   doc.moveTo(x, infoY + headerH).lineTo(x + w, infoY + headerH).stroke('#222')
   doc.font('Helvetica-Bold').fontSize(6.5).fillColor('#111')
-  doc.text(`N° facture : ${contract.contract_number}   |   Date : ${fmtDate(contract.contract_date || contract.start_date)}   |   Le locataire (client) : ${val(contract.driver1_name || contract.client_name)}`, x + 6, infoY + 4)
+  doc.text(
+    `N° facture : ${contract.contract_number}   |   Date : ${fmtDate(contract.contract_date || contract.start_date)}   |   Le locataire (client) : ${val(contract.driver1_name || contract.client_name)}`,
+    x + 6,
+    infoY + 4,
+  )
 
-  // Table Headers
   const tableY = infoY + headerH
   let cx = x
   const headers = ['Désignation', 'Qté', 'P.U. HT', 'Montant HT', 'TVA', 'Montant TVA', 'Montant TTC']
   doc.font('Helvetica-Bold').fontSize(7)
   headers.forEach((h, i) => {
-    if (i > 0) doc.moveTo(cx, tableY).lineTo(cx, tableY + tableHeadH + rowH).stroke('#222')
+    if (i > 0) doc.moveTo(cx, tableY).lineTo(cx, tableY + tableHeadH + tableRowsH).stroke('#222')
     doc.text(h, cx, tableY + 4, { width: cols[i], align: 'center' })
     cx += cols[i]
   })
-
   doc.moveTo(x, tableY + tableHeadH).lineTo(x + w, tableY + tableHeadH).stroke('#222')
 
-  // Table Row
-  const rowY = tableY + tableHeadH
-  const qty = contract.billed_days || 1
-  const rentalTtc = breakdown.lines.find((l) => l.label === 'Location')?.amount ?? qty * (contract.daily_rate ?? 0)
-  const rentalHt = contract.vat_applies && contract.vat_rate > 0 ? rentalTtc / (1 + contract.vat_rate / 100) : rentalTtc
-  const rentalVat = rentalTtc - rentalHt
-  const puHt = qty > 0 ? rentalHt / qty : rentalHt
-  const vehicleLabel = `${contract.vehicle_brand || ''} ${contract.vehicle_model || ''}`.trim()
-  const designation = `Location ${vehicleLabel || 'véhicule'} (${qty} j)`
+  lines.forEach((line, index) => {
+    const rowY = tableY + tableHeadH + index * rowH
+    if (index > 0) doc.moveTo(x, rowY).lineTo(x + w, rowY).stroke('#222')
 
-  const rowValues = [
-    designation,
-    String(qty),
-    money(puHt),
-    money(rentalHt),
-    contract.vat_applies ? `${contract.vat_rate} %` : '—',
-    contract.vat_applies ? money(rentalVat) : '—',
-    money(rentalTtc),
-  ]
+    const amountTtc = Number(line.amount ?? 0)
+    const amountHt = vatRate > 0 ? amountTtc / (1 + vatRate / 100) : amountTtc
+    const amountVat = amountTtc - amountHt
+    const isLocation = line.label === 'Location'
+    const designation = isLocation
+      ? `Location ${vehicleLabel || 'véhicule'} (${qty} j)`
+      : line.label
 
-  cx = x
-  doc.font('Helvetica').fontSize(6.5)
-  rowValues.forEach((cell, i) => {
-    if (i === 0) doc.text(cell, cx + 4, rowY + 5, { width: cols[i] - 8, align: 'left' })
-    else doc.text(cell, cx, rowY + 5, { width: cols[i], align: 'center' })
-    cx += cols[i]
+    const rowValues = [
+      designation,
+      isLocation ? String(qty) : '—',
+      isLocation && qty > 0 ? money(amountHt / qty) : '—',
+      money(amountHt),
+      vatApplies ? `${vatRate} %` : '—',
+      vatApplies ? money(amountVat) : '—',
+      money(amountTtc),
+    ]
+
+    cx = x
+    doc.font('Helvetica').fontSize(6.5).fillColor('#111')
+    rowValues.forEach((cell, i) => {
+      if (i === 0) doc.text(cell, cx + 4, rowY + 5, { width: cols[i] - 8, align: 'left' })
+      else doc.text(cell, cx, rowY + 5, { width: cols[i], align: 'center' })
+      cx += cols[i]
+    })
   })
 
   // Summary box
   const summaryY = y + topBoxH
-  const labelW = cols[3] + cols[4] + cols[5] // Montant HT + TVA + Montant TVA
-  const valueW = cols[6] // Montant TTC
+  const labelW = cols[3] + cols[4] + cols[5]
+  const valueW = cols[6]
   const sumX = x + cols[0] + cols[1] + cols[2]
 
   // Total HT
@@ -564,8 +634,8 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
   // TVA
   strokeBox(doc, sumX, summaryY + summaryH, labelW + valueW, summaryH)
   doc.moveTo(sumX + labelW, summaryY + summaryH).lineTo(sumX + labelW, summaryY + summaryH * 2).stroke('#222')
-  doc.font('Helvetica-Bold').text(`TVA (${contract.vat_applies ? contract.vat_rate : 0} %)`, sumX + 4, summaryY + summaryH + 4)
-  doc.text(contract.vat_applies ? money(breakdown.total_vat) : '—', sumX + labelW, summaryY + summaryH + 4, { width: valueW - 4, align: 'right' })
+  doc.font('Helvetica-Bold').text(`TVA (${vatApplies ? vatRate : 0} %)`, sumX + 4, summaryY + summaryH + 4)
+  doc.text(vatApplies ? money(breakdown.total_vat) : '—', sumX + labelW, summaryY + summaryH + 4, { width: valueW - 4, align: 'right' })
 
   // Total TTC
   strokeBox(doc, sumX, summaryY + summaryH * 2, labelW + valueW, summaryH)
@@ -573,19 +643,41 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
   doc.font('Helvetica-Bold').text('Total TTC', sumX + 4, summaryY + summaryH * 2 + 4)
   doc.text(money(breakdown.total_ttc), sumX + labelW, summaryY + summaryH * 2 + 4, { width: valueW - 4, align: 'right' })
 
+  const paidAmount = Math.max(0, Number(contract.paid_amount ?? 0))
+  const remainingUnpaid = Math.max(0, Number(breakdown.total_ttc) - paidAmount)
+
+  // Montant payé
+  strokeBox(doc, sumX, summaryY + summaryH * 3, labelW + valueW, summaryH)
+  doc.moveTo(sumX + labelW, summaryY + summaryH * 3).lineTo(sumX + labelW, summaryY + summaryH * 4).stroke('#222')
+  doc.font('Helvetica-Bold').text('Montant payé', sumX + 4, summaryY + summaryH * 3 + 4)
+  doc.text(money(paidAmount), sumX + labelW, summaryY + summaryH * 3 + 4, { width: valueW - 4, align: 'right' })
+
+  // Reste impayé
+  strokeBox(doc, sumX, summaryY + summaryH * 4, labelW + valueW, summaryH)
+  doc.moveTo(sumX + labelW, summaryY + summaryH * 4).lineTo(sumX + labelW, summaryY + summaryH * 5).stroke('#222')
+  doc.font('Helvetica-Bold').fillColor(remainingUnpaid > 0 ? '#b45309' : '#111')
+  doc.text('Reste impayé', sumX + 4, summaryY + summaryH * 4 + 4)
+  doc.text(
+    remainingUnpaid > 0 ? money(remainingUnpaid) : 'Soldé',
+    sumX + labelW,
+    summaryY + summaryH * 4 + 4,
+    { width: valueW - 4, align: 'right' },
+  )
+  doc.fillColor('#111')
+
   // Extras
-  const extrasY = summaryY + summaryH * 3 + 4
+  const extrasY = summaryY + summaryH * 5 + 4
   doc.font('Helvetica-Bold').fontSize(6.5).text('Franchise : ', sumX + 4, extrasY, { continued: true }).font('Helvetica').text(
     Number(contract.franchise_amount) > 0 ? money(contract.franchise_amount) : 'Non',
   )
   doc.font('Helvetica-Bold').text('Caution : ', sumX + 4, extrasY + 10, { continued: true }).font('Helvetica').text(money(contract.deposit_amount ?? contract.deposit ?? 0))
   doc.font('Helvetica-Bold').text('Tarif / jour : ', sumX + 4, extrasY + 20, { continued: true }).font('Helvetica').text(
-    contract.vat_applies
-      ? `${money((contract.daily_rate ?? 0) / (1 + contract.vat_rate / 100))} HT / ${money(contract.daily_rate ?? 0)} TTC`
+    vatApplies
+      ? `${money((contract.daily_rate ?? 0) / (1 + vatRate / 100))} HT / ${money(contract.daily_rate ?? 0)} TTC`
       : money(contract.daily_rate ?? 0)
   )
 
-  return topBoxH + summaryH * 3 + 34
+  return topBoxH + summaryH * 5 + 34
 }
 
 function drawSignatures(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number) {
@@ -638,6 +730,39 @@ function drawSignatures(doc: InstanceType<typeof PDFDocument>, x: number, y: num
   return h
 }
 
+function isPdfPath(filePath: string) {
+  return path.extname(filePath).toLowerCase() === '.pdf'
+}
+
+function drawConditionsVerso(doc: InstanceType<typeof PDFDocument>, settings: Record<string, string>) {
+  const filePath = settings.contract_conditions_image?.trim()
+  if (!filePath || !fs.existsSync(filePath) || isPdfPath(filePath)) return
+
+  doc.addPage({ size: 'A4', margin: 0 })
+  try {
+    doc.image(filePath, 0, 0, {
+      fit: [PAGE.w, PAGE.h],
+      align: 'center',
+      valign: 'center',
+    })
+  } catch {
+    // Skip verso if the image format cannot be embedded.
+  }
+}
+
+async function appendConditionsPdf(contractPdfPath: string, settings: Record<string, string>) {
+  const filePath = settings.contract_conditions_image?.trim()
+  if (!filePath || !fs.existsSync(filePath) || !isPdfPath(filePath)) return
+
+  const contractDoc = await PdfLibDocument.load(fs.readFileSync(contractPdfPath))
+  const conditionsDoc = await PdfLibDocument.load(fs.readFileSync(filePath))
+  const pages = await contractDoc.copyPages(conditionsDoc, conditionsDoc.getPageIndices())
+  for (const page of pages) {
+    contractDoc.addPage(page)
+  }
+  fs.writeFileSync(contractPdfPath, await contractDoc.save())
+}
+
 function drawFooter(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, settings: Record<string, string>) {
   const legalText =
     settings.legal_mention_fr?.trim() ||
@@ -681,18 +806,26 @@ export function buildContractPdf(
     let y = PAGE.m
     const x = PAGE.m
 
-    y += drawHeader(doc, x, y, CONTENT_W, contract, settings) + 6
-    y += drawDrivers(doc, x, y, CONTENT_W, contract) + 6
-    y += drawVehicleEquipment(doc, x, y, CONTENT_W, contract) + 6
-    y += drawVehicleState(doc, x, y, CONTENT_W, contract) + 6
-    y += drawInvoice(doc, x, y, CONTENT_W, contract, breakdown) + 6
+    y += drawHeader(doc, x, y, CONTENT_W, contract, settings) + SECTION_GAP
+    y += drawDrivers(doc, x, y, CONTENT_W, contract) + SECTION_GAP
+    y += drawVehicleEquipment(doc, x, y, CONTENT_W, contract) + SECTION_GAP
+    y += drawVehicleState(doc, x, y, CONTENT_W, contract) + SECTION_GAP
+    y += drawInvoice(doc, x, y, CONTENT_W, contract, breakdown) + SECTION_GAP
     drawSignatures(doc, x, y, CONTENT_W)
 
-    const footerY = PAGE.h - 40
+    const footerY = PAGE.h - PAGE.m - 32
     drawFooter(doc, x, footerY, CONTENT_W, settings)
+    drawConditionsVerso(doc, settings)
 
     doc.end()
-    stream.on('finish', () => resolve(outputPath))
+    stream.on('finish', async () => {
+      try {
+        await appendConditionsPdf(outputPath, settings)
+        resolve(outputPath)
+      } catch (error) {
+        reject(error)
+      }
+    })
     stream.on('error', reject)
   })
 }

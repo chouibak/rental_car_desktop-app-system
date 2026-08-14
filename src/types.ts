@@ -33,6 +33,10 @@ export type Car = {
   mileage: number
   fuel_level: string
   condition_notes: string
+  vidange_interval_km?: number
+  vidange_interval_months?: number
+  vidange_last_date?: string
+  vidange_last_mileage?: number
   doc_carte_grise_path: string
   doc_carte_grise_expiry: string
   doc_assurance_path: string
@@ -60,6 +64,47 @@ export type CarStats = {
   disponible: number
   louee: number
   hors_service: number
+}
+
+export type VidangeSeverity = 'critical' | 'high' | 'medium' | 'ok' | 'unknown'
+
+export type VidangeStatus = {
+  enabled: boolean
+  never_done: boolean
+  last_date: string
+  last_mileage: number
+  interval_km: number
+  interval_months: number
+  current_mileage: number
+  next_due_km: number | null
+  next_due_date: string | null
+  km_remaining: number | null
+  days_remaining: number | null
+  overdue: boolean
+  due_soon: boolean
+  due_by_km: boolean
+  due_by_date: boolean
+  severity: VidangeSeverity
+}
+
+export type CarVidange = {
+  id: number
+  car_id: number
+  performed_at: string
+  mileage: number
+  cost: number
+  notes: string
+  expense_id: number | null
+  created_at: string
+}
+
+export type CarVidangeInput = {
+  car_id: number
+  performed_at: string
+  mileage: number
+  cost?: number
+  notes?: string
+  create_expense?: boolean
 }
 
 export type Customer = {
@@ -229,6 +274,8 @@ export type Contract = {
   billed_days?: number
   extension_until?: string
   extension_days?: number
+  original_return_at?: string
+  original_total_amount?: number
   departure_notes?: string
   return_notes?: string
   equipment?: string
@@ -277,6 +324,11 @@ export type ContractInput = Partial<Contract> & {
 
 export type ContractStats = {
   active: number
+  draft: number
+  total: number
+  unpaid_amount: number
+  unpaid_count: number
+  paid_amount: number
   overdue: number
 }
 
@@ -463,6 +515,11 @@ export type RevenueMethodPoint = {
   amount: number
 }
 
+export type RevenueCategoryPoint = {
+  category: string
+  amount: number
+}
+
 export type RevenueStats = {
   today_revenue: number
   month_revenue: number
@@ -493,6 +550,8 @@ export type NotificationKind =
   | 'customer_doc_expiring'
   | 'chauffeur_doc_expired'
   | 'chauffeur_doc_expiring'
+  | 'car_vidange_overdue'
+  | 'car_vidange_soon'
 
 export type Notification = {
   id: string
@@ -505,6 +564,7 @@ export type Notification = {
   subtitle: string
   doc_type?: string
   entity_id: number
+  km_remaining?: number | null
 }
 
 export type NotificationCounts = {
@@ -620,13 +680,25 @@ declare global {
       deleteContract: (id: number) => Promise<{ ok: boolean }>
       restoreContract: (id: number) => Promise<Contract | null>
       createContractFromReservation: (reservationId: number) => Promise<Contract>
-      markContractDelivered: (id: number) => Promise<Contract>
+      markContractDelivered: (id: number, data?: Record<string, unknown>) => Promise<Contract>
       closeContract: (id: number, data: Record<string, unknown>) => Promise<Contract>
+      updateReturnHandover: (id: number, data: Record<string, unknown>) => Promise<Contract>
       cancelContract: (id: number) => Promise<Contract>
+      extendContract: (id: number, data: {
+        extra_days?: number
+        new_return_at?: string
+        note?: string
+      }) => Promise<Contract>
+      setContractExtension: (id: number, data: {
+        extension_days: number
+        note?: string
+      }) => Promise<Contract>
+      removeContractExtension: (id: number) => Promise<Contract>
       getContractStats: () => Promise<ContractStats>
       generateContractPdf: (id: number) => Promise<{ ok: boolean; path: string }>
       openContractPdf: (id: number) => Promise<{ ok: boolean; path: string }>
       pickContractDamagePhoto: (kind: 'departure' | 'return') => Promise<{ path: string; url: string } | null>
+      pickContractDamageVideo: (kind?: 'departure' | 'return') => Promise<{ path: string; url: string } | null>
       returnContract: (id: number, data: Record<string, unknown>) => Promise<Contract>
       listPayments: (contractId?: number) => Promise<Payment[]>
       createPayment: (data: Record<string, unknown>) => Promise<Payment>
@@ -661,6 +733,19 @@ declare global {
         date_from?: string
         date_to?: string
       }) => Promise<{ ok: boolean; canceled?: boolean; filePath?: string }>
+      listVidanges: (carId: number) => Promise<CarVidange[]>
+      getVidangeStatus: (carId: number) => Promise<VidangeStatus | null>
+      createVidange: (data: CarVidangeInput) => Promise<CarVidange>
+      updateVidange: (
+        id: number,
+        data: Partial<Omit<CarVidangeInput, 'car_id' | 'create_expense'>>,
+      ) => Promise<CarVidange>
+      deleteVidange: (id: number) => Promise<{ ok: boolean }>
+      updateVidangeIntervals: (
+        carId: number,
+        intervalKm: number,
+        intervalMonths: number,
+      ) => Promise<VidangeStatus | null>
       getRevenueStats: () => Promise<RevenueStats>
       getNotifications: () => Promise<Notification[]>
       getNotificationCounts: () => Promise<NotificationCounts>
@@ -669,6 +754,9 @@ declare global {
       pickCompanyLogo: () => Promise<{ path: string; url: string } | null>
       getCompanyLogoUrl: (filePath: string) => Promise<string>
       removeCompanyLogo: (filePath: string) => Promise<{ ok: boolean }>
+      pickContractConditionsImage: () => Promise<{ path: string; url: string } | null>
+      getContractConditionsUrl: (filePath: string) => Promise<string>
+      removeContractConditionsImage: (filePath: string) => Promise<{ ok: boolean }>
       getLicenseStatus: () => Promise<LicenseStatus>
       activateLicense: (
         key: string,

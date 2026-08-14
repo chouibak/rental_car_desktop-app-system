@@ -27,8 +27,9 @@ export default function DashboardPage() {
 
   return (
     <div className="dashboard-page">
-      <PageHeader title={t.dashboard} subtitle={t.dashboardSubtitle} />
-      <LicenseTrialDashboard />
+      <PageHeader title={t.dashboard} subtitle={t.dashboardSubtitle}>
+        <LicenseTrialDashboard />
+      </PageHeader>
 
       <div className="cards">
         <StatCard label={t.totalCars} value={stats.cars} />

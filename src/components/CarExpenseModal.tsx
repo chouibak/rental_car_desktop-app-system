@@ -244,11 +244,11 @@ export function CarExpenseModal({ open, carId, carLabel, expense, onClose, onSav
           </div>
         </div>
 
-        <footer>
+        <footer className="form-actions">
           <button type="button" className="btn secondary" onClick={onClose} disabled={saving}>
             {t.cancel}
           </button>
-          <button type="submit" className="btn" disabled={saving}>
+          <button type="submit" className="btn btn-register" disabled={saving}>
             {saving ? t.loading : t.save}
           </button>
         </footer>

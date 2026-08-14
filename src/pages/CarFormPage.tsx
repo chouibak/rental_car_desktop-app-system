@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { fileBasename } from '../utils/file'
+import { FUEL_FRACTION, FUEL_LEVELS } from '../utils/contracts'
 import type { Car, CarCategory, CarComputedStatus, CarFuel, CarImage, CarTransmission } from '../types'
 
 const CATEGORIES: CarCategory[] = ['economique', 'compacte', 'suv', '4x4', 'monospace']
@@ -17,12 +18,12 @@ type DocKey =
   | 'doc_vignette'
   | 'doc_autorisation'
 
-const DOC_FIELDS: { key: DocKey; labelKey: keyof import('../i18n').Dict }[] = [
-  { key: 'doc_carte_grise', labelKey: 'carteGrise' },
-  { key: 'doc_assurance', labelKey: 'assurance' },
-  { key: 'doc_controle_technique', labelKey: 'controleTechnique' },
-  { key: 'doc_vignette', labelKey: 'vignette' },
-  { key: 'doc_autorisation', labelKey: 'autorisation' },
+const DOC_FIELDS: { key: DocKey; labelKey: keyof import('../i18n').Dict; hasExpiry: boolean }[] = [
+  { key: 'doc_carte_grise', labelKey: 'carteGrise', hasExpiry: false },
+  { key: 'doc_assurance', labelKey: 'assurance', hasExpiry: true },
+  { key: 'doc_controle_technique', labelKey: 'controleTechnique', hasExpiry: true },
+  { key: 'doc_vignette', labelKey: 'vignette', hasExpiry: true },
+  { key: 'doc_autorisation', labelKey: 'autorisation', hasExpiry: true },
 ]
 
 const emptyForm = (): Partial<Car> & { images: CarImage[] } => ({
@@ -42,8 +43,12 @@ const emptyForm = (): Partial<Car> & { images: CarImage[] } => ({
   status: 'disponible',
   is_available: true,
   mileage: 0,
-  fuel_level: '',
+  fuel_level: 'plein',
   condition_notes: '',
+  vidange_interval_km: 10000,
+  vidange_interval_months: 6,
+  vidange_last_date: '',
+  vidange_last_mileage: 0,
   doc_carte_grise_path: '',
   doc_carte_grise_expiry: '',
   doc_assurance_path: '',
@@ -122,6 +127,8 @@ export default function CarFormPage() {
   const buildPayload = (next: Partial<Car> & { images: CarImage[] }) =>
     syncName({
       ...next,
+      // Carte grise has no expiry in Morocco workflow — never persist one.
+      doc_carte_grise_expiry: '',
       name: next.name || `${next.brand} ${next.model}`.trim(),
       status: (next.status ?? 'disponible') as CarComputedStatus,
       images: (next.images ?? []).map((img, index) => ({ path: img.path, position: index })),
@@ -402,15 +409,38 @@ export default function CarFormPage() {
               />
             </div>
             <div className="field">
+              <label>{t.vidangeIntervalKm}</label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step={500}
+                value={form.vidange_interval_km ?? 10000}
+                onChange={(e) => setForm((f) => ({ ...f, vidange_interval_km: Number(e.target.value) }))}
+              />
+            </div>
+            <div className="field">
+              <label>{t.vidangeIntervalMonths}</label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                value={form.vidange_interval_months ?? 6}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, vidange_interval_months: Number(e.target.value) }))
+                }
+              />
+            </div>
+            <div className="field">
               <label>{t.fuelLevel}</label>
               <select
                 className="select"
                 value={form.fuel_level || 'plein'}
                 onChange={(e) => setForm((f) => ({ ...f, fuel_level: e.target.value }))}
               >
-                {(['vide', 'quart', 'moitie', 'trois_quarts', 'plein'] as const).map((level) => (
+                {FUEL_LEVELS.map((level) => (
                   <option key={level} value={level}>
-                    {t[`fuel_${level}` as keyof typeof t] || level}
+                    {FUEL_FRACTION[level]}
                   </option>
                 ))}
               </select>
@@ -490,6 +520,7 @@ export default function CarFormPage() {
             {docMeta.map((doc) => {
               const path = form[doc.pathKey] as string
               const expiry = form[doc.expiryKey] as string
+              const hasExpiry = DOC_FIELDS.find((d) => d.key === doc.key)?.hasExpiry !== false
               return (
                 <div className="doc-row" key={doc.key}>
                   <div className="doc-info">
@@ -505,15 +536,19 @@ export default function CarFormPage() {
                       <span className="muted-text">{t.noData}</span>
                     )}
                   </div>
-                  <div className="field doc-expiry-field">
-                    <label>{t.expiryDate}</label>
-                    <input
-                      className="input"
-                      type="date"
-                      value={expiry || ''}
-                      onChange={(e) => setForm((f) => ({ ...f, [doc.expiryKey]: e.target.value }))}
-                    />
-                  </div>
+                  {hasExpiry ? (
+                    <div className="field doc-expiry-field">
+                      <label>{t.expiryDate}</label>
+                      <input
+                        className="input"
+                        type="date"
+                        value={expiry || ''}
+                        onChange={(e) => setForm((f) => ({ ...f, [doc.expiryKey]: e.target.value }))}
+                      />
+                    </div>
+                  ) : (
+                    <div className="doc-expiry-field doc-expiry-field--none" />
+                  )}
                   <div className="row-actions">
                     <button type="button" className="btn secondary" onClick={() => onAddDocument(doc.key)}>
                       {path ? t.edit : t.addDocument}
@@ -532,11 +567,16 @@ export default function CarFormPage() {
 
         {error && <div className="error">{error}</div>}
 
-        <div className="form-actions">
-          <button type="button" className="btn secondary" onClick={() => navigate('/cars')}>
+        <div className="form-actions form-actions--sticky car-form-actions">
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={() => navigate(isEdit && carId ? `/cars/${carId}` : '/cars')}
+            disabled={saving}
+          >
             {t.cancel}
           </button>
-          <button className="btn" type="submit" disabled={saving}>
+          <button className="btn btn-register" type="submit" disabled={saving}>
             {saving ? t.loading : t.save}
           </button>
         </div>

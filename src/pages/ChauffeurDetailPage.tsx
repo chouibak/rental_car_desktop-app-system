@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { IconEdit, IconTrash } from '../components/icons'
+import { IconChevronLeft, IconEdit, IconTrash } from '../components/icons'
 import { PageHeader } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import type { Chauffeur } from '../types'
@@ -94,17 +94,22 @@ export default function ChauffeurDetailPage() {
   return (
     <div>
       <PageHeader title={chauffeur.name} subtitle={chauffeur.phone || undefined}>
-        <Link className="btn secondary sm" to="/chauffeurs">
-          {t.back}
-        </Link>
-        <Link className="btn sm" to={`/chauffeurs/${chauffeur.id}/edit`}>
-          <IconEdit size={15} />
-          {t.edit}
-        </Link>
-        <button className="btn danger sm" onClick={onDelete}>
-          <IconTrash size={15} />
-          {t.delete}
-        </button>
+        <div className="toolbar-nav">
+          <Link className="btn btn-back" to="/chauffeurs">
+            <IconChevronLeft size={16} />
+            {t.back}
+          </Link>
+        </div>
+        <div className="toolbar-manage">
+          <Link className="btn btn-edit" to={`/chauffeurs/${chauffeur.id}/edit`}>
+            <IconEdit size={16} />
+            {t.edit}
+          </Link>
+          <button type="button" className="btn danger" onClick={onDelete}>
+            <IconTrash size={15} />
+            {t.delete}
+          </button>
+        </div>
       </PageHeader>
 
       <div className="car-detail-meta">

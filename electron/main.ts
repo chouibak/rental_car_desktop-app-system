@@ -1,6 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, net } from 'electron'
+import './gpu-fix'
+import { app, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { serveAppFileRequest } from './storage'
 import { initDb, getDbApi } from './db'
 import {
   deleteStoredFile,
@@ -16,7 +17,7 @@ import {
   openCustomerFile,
   pickCustomerDocument,
 } from './customers-files'
-import { generateContractPdf, openContractPdf, pickContractDamagePhoto } from './contract-files'
+import { generateContractPdf, openContractPdf, pickContractDamagePhoto, pickContractDamageVideo } from './contract-files'
 import {
   deleteExpenseFile,
   exportExpensesExcel,
@@ -29,7 +30,14 @@ import {
   openChauffeurFile,
   pickChauffeurDocument,
 } from './chauffeurs-files'
-import { getCompanyLogoUrl, pickCompanyLogo, removeCompanyLogo } from './settings-files'
+import {
+  getCompanyLogoUrl,
+  getContractConditionsUrl,
+  pickCompanyLogo,
+  pickContractConditionsImage,
+  removeCompanyLogo,
+  removeContractConditionsImage,
+} from './settings-files'
 import {
   activateLicense,
   assertLicenseValid,
@@ -85,6 +93,38 @@ function resolveWindowIcon() {
   return path.join(__dirname, '../build/icon.ico')
 }
 
+async function waitForDevServer(url: string, attempts = 40, delayMs = 250) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const response = await net.fetch(url, { method: 'GET' })
+      if (response.ok || response.status === 304) return
+    } catch {
+      // Vite not ready yet
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs))
+  }
+  throw new Error(`Dev server unavailable: ${url}`)
+}
+
+async function loadRenderer(win: BrowserWindow) {
+  if (VITE_DEV_SERVER_URL) {
+    await waitForDevServer(VITE_DEV_SERVER_URL)
+    let lastError: unknown
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await win.loadURL(VITE_DEV_SERVER_URL)
+        return
+      } catch (error) {
+        lastError = error
+        await new Promise((resolve) => setTimeout(resolve, 400))
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError))
+  }
+
+  await win.loadFile(path.join(process.env.DIST!, 'index.html'))
+}
+
 async function createWindow() {
   const userDataPath = app.getPath('userData')
   initLicense(userDataPath)
@@ -94,7 +134,7 @@ async function createWindow() {
     height: 800,
     minWidth: 1000,
     minHeight: 650,
-    show: false,
+    show: true,
     title: 'LocAgence Pro',
     icon: resolveWindowIcon(),
     webPreferences: {
@@ -104,26 +144,31 @@ async function createWindow() {
     },
   })
 
-  win.once('ready-to-show', () => {
-    win?.show()
-    win?.focus()
-  })
+  const reveal = () => {
+    if (!win || win.isDestroyed()) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
 
-  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
+  win.once('ready-to-show', reveal)
+  win.webContents.once('did-finish-load', reveal)
+
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return
+    // -3 ERR_ABORTED is common during HMR / reloads — ignore it.
+    if (errorCode === -3) return
+    reveal()
     dialog.showErrorBox(
       'LocAgence Pro',
-      `Impossible de charger l'interface.\n\n${errorCode}: ${errorDescription}`,
+      `Impossible de charger l'interface.\n\n${errorCode}: ${errorDescription}\n${validatedURL || ''}`,
     )
   })
 
   await initDb(userDataPath)
   registerIpc()
-
-  if (VITE_DEV_SERVER_URL) {
-    await win.loadURL(VITE_DEV_SERVER_URL)
-  } else {
-    await win.loadFile(path.join(process.env.DIST!, 'index.html'))
-  }
+  await loadRenderer(win)
+  reveal()
 }
 
 function registerIpc() {
@@ -220,14 +265,21 @@ function registerIpc() {
   ipcMain.handle('contracts:return', (_e, id, data) => api.returnContract(id, data))
   ipcMain.handle('contracts:restore', (_e, id) => api.restoreContract(id))
   ipcMain.handle('contracts:createFromReservation', (_e, reservationId) => api.createContractFromReservation(reservationId))
-  ipcMain.handle('contracts:markDelivered', (_e, id) => api.markContractDelivered(id))
+  ipcMain.handle('contracts:markDelivered', (_e, id, data) => api.markContractDelivered(id, data))
   ipcMain.handle('contracts:close', (_e, id, data) => api.closeContract(id, data))
+  ipcMain.handle('contracts:updateReturnHandover', (_e, id, data) => api.updateReturnHandover(id, data))
   ipcMain.handle('contracts:cancel', (_e, id) => api.cancelContract(id))
+  ipcMain.handle('contracts:extend', (_e, id, data) => api.extendContract(id, data))
+  ipcMain.handle('contracts:setExtension', (_e, id, data) => api.setContractExtension(id, data))
+  ipcMain.handle('contracts:removeExtension', (_e, id) => api.removeContractExtension(id))
   ipcMain.handle('contracts:stats', () => api.getContractStats())
   ipcMain.handle('contracts:generatePdf', (_e, id) => generateContractPdf(id))
   ipcMain.handle('contracts:openPdf', (_e, id) => openContractPdf(id))
   ipcMain.handle('contracts:pickDamagePhoto', (_e, kind: 'departure' | 'return') =>
     pickContractDamagePhoto(win, kind),
+  )
+  ipcMain.handle('contracts:pickDamageVideo', (_e, kind: 'departure' | 'return') =>
+    pickContractDamageVideo(win, kind ?? 'departure'),
   )
 
   ipcMain.handle('payments:list', (_e, contractId) => api.listPayments(contractId))
@@ -246,6 +298,15 @@ function registerIpc() {
   ipcMain.handle('expenses:getFileUrl', (_e, filePath: string) => getExpenseFileUrl(filePath))
   ipcMain.handle('expenses:openFile', (_e, filePath: string) => openExpenseFile(filePath))
   ipcMain.handle('expenses:exportExcel', (_e, filters) => exportExpensesExcel(filters))
+
+  ipcMain.handle('vidange:list', (_e, carId: number) => api.listVidanges(carId))
+  ipcMain.handle('vidange:status', (_e, carId: number) => api.getVidangeStatus(carId))
+  ipcMain.handle('vidange:create', (_e, data) => api.createVidange(data))
+  ipcMain.handle('vidange:update', (_e, id: number, data) => api.updateVidange(id, data))
+  ipcMain.handle('vidange:delete', (_e, id: number) => api.deleteVidange(id))
+  ipcMain.handle('vidange:updateIntervals', (_e, carId: number, intervalKm: number, intervalMonths: number) =>
+    api.updateVidangeIntervals(carId, intervalKm, intervalMonths),
+  )
 
   ipcMain.handle('chauffeurs:list', (_e, filters) => api.listChauffeurs(filters))
   ipcMain.handle('chauffeurs:get', (_e, id) => api.getChauffeur(id))
@@ -271,6 +332,12 @@ function registerIpc() {
     removeCompanyLogo(filePath)
     return { ok: true }
   })
+  ipcMain.handle('settings:pickConditions', () => pickContractConditionsImage(win))
+  ipcMain.handle('settings:getConditionsUrl', (_e, filePath: string) => getContractConditionsUrl(filePath))
+  ipcMain.handle('settings:removeConditions', (_e, filePath: string) => {
+    removeContractConditionsImage(filePath)
+    return { ok: true }
+  })
 }
 
 app.on('second-instance', () => {
@@ -283,15 +350,7 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
   if (!gotSingleInstanceLock) return
 
-  protocol.handle('app-file', (request) => {
-    const raw = request.url.replace(/^app-file:/i, '')
-    const parsed = new URL(raw.startsWith('//') ? `file:${raw}` : `file://${raw}`)
-    let filePath = decodeURIComponent(parsed.pathname)
-    if (process.platform === 'win32' && filePath.startsWith('/')) {
-      filePath = filePath.slice(1)
-    }
-    return net.fetch(pathToFileURL(filePath).href)
-  })
+  protocol.handle('app-file', (request) => serveAppFileRequest(request))
 
   try {
     await createWindow()

@@ -34,7 +34,10 @@ import {
   type ReservationPaymentFilters,
   type ReservationPaymentInput,
 } from './reservation-payments-db'
-import { syncReservationPaymentStatusForContract } from './payment-sync'
+import {
+  syncReservationPaymentStatus,
+  syncReservationPaymentStatusForContract,
+} from './payment-sync'
 import {
   CARS_IN_USE_SQL,
   OVERDUE_RENTALS_COUNT_SQL,
@@ -46,6 +49,9 @@ import {
   type ContractFilters,
   type ContractInput,
   type CloseContractInput,
+  type DeliveryHandoverInput,
+  type ExtendContractInput,
+  type SetContractExtensionInput,
 } from './contracts-db'
 import {
   createExpensesApi,
@@ -54,6 +60,12 @@ import {
   type ExpenseFilters,
   type ExpenseInput,
 } from './expenses-db'
+import {
+  createVidangeApi,
+  createVidangeSchema,
+  migrateCarVidangeColumns,
+  type CarVidangeInput,
+} from './vidange-db'
 import {
   createChauffeursApi,
   createChauffeursSchema,
@@ -113,6 +125,7 @@ let reservationsApi: ReturnType<typeof createReservationsApi>
 let reservationPaymentsApi: ReturnType<typeof createReservationPaymentsApi>
 let contractsApi: ReturnType<typeof createContractsApi>
 let expensesApi: ReturnType<typeof createExpensesApi>
+let vidangeApi: ReturnType<typeof createVidangeApi>
 let chauffeursApi: ReturnType<typeof createChauffeursApi>
 let revenueApi: ReturnType<typeof createRevenueApi>
 let notificationsApi: ReturnType<typeof createNotificationsApi>
@@ -136,6 +149,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   company_fax: '',
   company_tagline: 'Location de voitures',
   company_logo: '',
+  contract_conditions_image: '',
   company_ice: '',
   company_rc: '',
   company_if: '',
@@ -294,6 +308,8 @@ export async function initDb(userDataPath: string) {
   migrateCarsTable(db, dbHelpers())
   createCarsSchema(db)
   migrateCarStatusColumn(db, dbHelpers())
+  migrateCarVidangeColumns(db, dbHelpers())
+  createVidangeSchema(db)
   createCustomersSchema(db)
   migrateCustomersTable(db, dbHelpers())
   migrateClientsToCustomers(db, dbHelpers())
@@ -316,6 +332,36 @@ export async function initDb(userDataPath: string) {
     return settings
   })
   expensesApi = createExpensesApi(dbHelpers())
+  vidangeApi = createVidangeApi(
+    dbHelpers(),
+    (data) =>
+      expensesApi.createExpense({
+        title: data.title,
+        category: 'maintenance',
+        amount: data.amount,
+        expense_date: data.expense_date,
+        payment_method: 'cash',
+        car_id: data.car_id,
+        notes: data.notes,
+      }),
+    (expenseId) => {
+      expensesApi.deleteExpense(expenseId)
+    },
+    (expenseId, data) => {
+      const existing = expensesApi.getExpense(expenseId)
+      if (!existing) return
+      expensesApi.updateExpense(expenseId, {
+        title: existing.title,
+        category: existing.category,
+        amount: data.amount,
+        expense_date: data.expense_date,
+        payment_method: existing.payment_method,
+        receipt_path: existing.receipt_path,
+        notes: data.notes ?? existing.notes,
+        car_id: existing.car_id,
+      })
+    },
+  )
   chauffeursApi = createChauffeursApi(dbHelpers())
   revenueApi = createRevenueApi(dbHelpers())
   notificationsApi = createNotificationsApi(dbHelpers(), getSettingsMap)
@@ -410,7 +456,7 @@ export type { CarInput, CarFilters } from './cars-db'
 export type { CustomerInput } from './customers-db'
 export type { ReservationInput, ReservationFilters } from './reservations-db'
 export type { ReservationPaymentInput, ReservationPaymentFilters } from './reservation-payments-db'
-export type { ContractInput, ContractFilters, CloseContractInput } from './contracts-db'
+export type { ContractInput, ContractFilters, CloseContractInput, DeliveryHandoverInput, ExtendContractInput, SetContractExtensionInput } from './contracts-db'
 export type { ExpenseInput, ExpenseFilters } from './expenses-db'
 export type { ChauffeurInput, ChauffeurFilters } from './chauffeurs-db'
 export type { RevenueStats, RevenueMonthPoint, RevenueMethodPoint } from './revenue-db'
@@ -426,9 +472,11 @@ export type PaymentInput = {
 
 export type ReturnInput = {
   returned_at?: string
+  return_place?: string
   mileage?: number
   fuel_level?: string
   damages?: string
+  return_damages?: Array<{ part: string; type: string; note: string; photo?: string }>
   extra_fees?: number
   notes?: string
 }
@@ -584,8 +632,17 @@ export function getDbApi() {
     createReservation: (data: ReservationInput) => reservationsApi.createReservation(data),
     updateReservation: (id: number, data: ReservationInput) => reservationsApi.updateReservation(id, data),
     deleteReservation: (id: number) => {
+      const t = now()
+      // Soft-delete linked contracts so their payments leave recettes/stats.
+      run(
+        `UPDATE contracts SET deleted_at = ?, updated_at = ?
+         WHERE reservation_id = ? AND deleted_at IS NULL`,
+        [t, t, id],
+      )
       reservationPaymentsApi.deleteReservationPaymentsByReservation(id)
-      return reservationsApi.deleteReservation(id)
+      const result = reservationsApi.deleteReservation(id)
+      syncAllCarStatuses(dbHelpers())
+      return result
     },
 
     listReservationPayments: (filters?: ReservationPaymentFilters) =>
@@ -607,36 +664,96 @@ export function getDbApi() {
 
     listContracts: (filters?: ContractFilters) => contractsApi.listContracts(filters),
     getContract: (id: number) => contractsApi.getContract(id),
-    createContract: (data: ContractInput) => contractsApi.createContract(data),
-    updateContract: (id: number, data: ContractInput) => contractsApi.updateContract(id, data),
-    deleteContract: (id: number) => contractsApi.deleteContract(id),
-    restoreContract: (id: number) => contractsApi.restoreContract(id),
-    createContractFromReservation: (reservationId: number) => contractsApi.createFromReservation(reservationId),
-    markContractDelivered: (id: number) => {
-      const result = contractsApi.markDelivered(id)
+    createContract: (data: ContractInput) => {
+      const result = contractsApi.createContract(data)
+      syncAllCarStatuses(dbHelpers())
+      return result
+    },
+    updateContract: (id: number, data: ContractInput) => {
+      const result = contractsApi.updateContract(id, data)
+      syncAllCarStatuses(dbHelpers())
+      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      return result
+    },
+    deleteContract: (id: number) => {
+      const linked = queryOne<{ reservation_id: number | null }>(
+        'SELECT reservation_id FROM contracts WHERE id = ?',
+        [id],
+      )
+      const result = contractsApi.deleteContract(id)
+      syncAllCarStatuses(dbHelpers())
+      if (linked?.reservation_id) {
+        syncReservationPaymentStatus(dbHelpers(), linked.reservation_id)
+      }
+      return result
+    },
+    restoreContract: (id: number) => {
+      const result = contractsApi.restoreContract(id)
+      syncAllCarStatuses(dbHelpers())
+      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      return result
+    },
+    createContractFromReservation: (reservationId: number) => {
+      const result = contractsApi.createFromReservation(reservationId)
+      syncAllCarStatuses(dbHelpers())
+      return result
+    },
+    markContractDelivered: (id: number, data?: DeliveryHandoverInput) => {
+      const result = contractsApi.markDelivered(id, data)
       syncAllCarStatuses(dbHelpers())
       return result
     },
     closeContract: (id: number, data: CloseContractInput) => {
       const result = contractsApi.closeContract(id, data)
       syncAllCarStatuses(dbHelpers())
+      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      return result
+    },
+    updateReturnHandover: (id: number, data: CloseContractInput) => {
+      const result = contractsApi.updateReturnHandover(id, data)
+      syncAllCarStatuses(dbHelpers())
+      syncReservationPaymentStatusForContract(dbHelpers(), id)
       return result
     },
     cancelContract: (id: number) => {
       const result = contractsApi.cancelContract(id)
       syncAllCarStatuses(dbHelpers())
+      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      return result
+    },
+    extendContract: (id: number, data: ExtendContractInput) => {
+      const result = contractsApi.extendContract(id, data)
+      syncAllCarStatuses(dbHelpers())
+      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      return result
+    },
+    setContractExtension: (id: number, data: SetContractExtensionInput) => {
+      const result = contractsApi.setContractExtension(id, data)
+      syncAllCarStatuses(dbHelpers())
+      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      return result
+    },
+    removeContractExtension: (id: number) => {
+      const result = contractsApi.removeContractExtension(id)
+      syncAllCarStatuses(dbHelpers())
+      syncReservationPaymentStatusForContract(dbHelpers(), id)
       return result
     },
     getContractStats: () => contractsApi.getContractStats(),
     getContractInvoiceBreakdown: (id: number) => contractsApi.invoiceBreakdown(id),
     returnContract(id: number, data: ReturnInput) {
-      return contractsApi.closeContract(id, {
+      const result = contractsApi.closeContract(id, {
         return_at: data.returned_at,
+        return_place: data.return_place,
         return_mileage: data.mileage,
         return_fuel_level: data.fuel_level,
-        return_notes: data.notes,
+        return_notes: data.notes?.trim() || undefined,
+        return_damages: data.return_damages,
         return_extra_fees: data.extra_fees,
       })
+      syncAllCarStatuses(dbHelpers())
+      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      return result
     },
 
     listPayments(contractId?: number) {
@@ -653,6 +770,9 @@ export function getDbApi() {
     },
 
     createPayment(data: PaymentInput) {
+      if (!Number.isFinite(Number(data.amount)) || Number(data.amount) <= 0) {
+        throw new Error('INVALID_AMOUNT')
+      }
       const t = now()
       const id = runInsert(
         `INSERT INTO payments (contract_id, amount, method, paid_at, note, created_at)
@@ -702,6 +822,15 @@ export function getDbApi() {
     updateExpense: (id: number, data: ExpenseInput) => expensesApi.updateExpense(id, data),
     deleteExpense: (id: number) => expensesApi.deleteExpense(id),
     getExpenseStats: (filters?: ExpenseFilters) => expensesApi.getExpenseStats(filters),
+
+    listVidanges: (carId: number) => vidangeApi.listVidanges(carId),
+    getVidangeStatus: (carId: number) => vidangeApi.getVidangeStatus(carId),
+    createVidange: (data: CarVidangeInput) => vidangeApi.createVidange(data),
+    updateVidange: (id: number, data: Partial<Omit<CarVidangeInput, 'car_id' | 'create_expense'>>) =>
+      vidangeApi.updateVidange(id, data),
+    deleteVidange: (id: number) => vidangeApi.deleteVidange(id),
+    updateVidangeIntervals: (carId: number, intervalKm: number, intervalMonths: number) =>
+      vidangeApi.updateVidangeIntervals(carId, intervalKm, intervalMonths),
 
     listChauffeurs: (filters?: ChauffeurFilters) => chauffeursApi.listChauffeurs(filters),
     getChauffeur: (id: number) => chauffeursApi.getChauffeur(id),

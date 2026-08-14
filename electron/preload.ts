@@ -56,13 +56,21 @@ const api = {
   returnContract: (id: number, data: unknown) => ipcRenderer.invoke('contracts:return', id, data),
   restoreContract: (id: number) => ipcRenderer.invoke('contracts:restore', id),
   createContractFromReservation: (reservationId: number) => ipcRenderer.invoke('contracts:createFromReservation', reservationId),
-  markContractDelivered: (id: number) => ipcRenderer.invoke('contracts:markDelivered', id),
+  markContractDelivered: (id: number, data?: unknown) => ipcRenderer.invoke('contracts:markDelivered', id, data),
   closeContract: (id: number, data: unknown) => ipcRenderer.invoke('contracts:close', id, data),
+  updateReturnHandover: (id: number, data: unknown) => ipcRenderer.invoke('contracts:updateReturnHandover', id, data),
   cancelContract: (id: number) => ipcRenderer.invoke('contracts:cancel', id),
+  extendContract: (id: number, data: { extra_days?: number; new_return_at?: string; note?: string }) =>
+    ipcRenderer.invoke('contracts:extend', id, data),
+  setContractExtension: (id: number, data: { extension_days: number; note?: string }) =>
+    ipcRenderer.invoke('contracts:setExtension', id, data),
+  removeContractExtension: (id: number) => ipcRenderer.invoke('contracts:removeExtension', id),
   getContractStats: () => ipcRenderer.invoke('contracts:stats'),
   generateContractPdf: (id: number) => ipcRenderer.invoke('contracts:generatePdf', id),
   openContractPdf: (id: number) => ipcRenderer.invoke('contracts:openPdf', id),
   pickContractDamagePhoto: (kind: 'departure' | 'return') => ipcRenderer.invoke('contracts:pickDamagePhoto', kind),
+  pickContractDamageVideo: (kind?: 'departure' | 'return') =>
+    ipcRenderer.invoke('contracts:pickDamageVideo', kind ?? 'departure'),
 
   listPayments: (contractId?: number) => ipcRenderer.invoke('payments:list', contractId),
   createPayment: (data: unknown) => ipcRenderer.invoke('payments:create', data),
@@ -80,6 +88,14 @@ const api = {
   getExpenseFileUrl: (filePath: string) => ipcRenderer.invoke('expenses:getFileUrl', filePath),
   openExpenseFile: (filePath: string) => ipcRenderer.invoke('expenses:openFile', filePath),
   exportExpensesExcel: (filters?: unknown) => ipcRenderer.invoke('expenses:exportExcel', filters),
+
+  listVidanges: (carId: number) => ipcRenderer.invoke('vidange:list', carId),
+  getVidangeStatus: (carId: number) => ipcRenderer.invoke('vidange:status', carId),
+  createVidange: (data: unknown) => ipcRenderer.invoke('vidange:create', data),
+  updateVidange: (id: number, data: unknown) => ipcRenderer.invoke('vidange:update', id, data),
+  deleteVidange: (id: number) => ipcRenderer.invoke('vidange:delete', id),
+  updateVidangeIntervals: (carId: number, intervalKm: number, intervalMonths: number) =>
+    ipcRenderer.invoke('vidange:updateIntervals', carId, intervalKm, intervalMonths),
 
   listChauffeurs: (filters?: unknown) => ipcRenderer.invoke('chauffeurs:list', filters),
   getChauffeur: (id: number) => ipcRenderer.invoke('chauffeurs:get', id),
@@ -100,6 +116,9 @@ const api = {
   pickCompanyLogo: () => ipcRenderer.invoke('settings:pickLogo'),
   getCompanyLogoUrl: (filePath: string) => ipcRenderer.invoke('settings:getLogoUrl', filePath),
   removeCompanyLogo: (filePath: string) => ipcRenderer.invoke('settings:removeLogo', filePath),
+  pickContractConditionsImage: () => ipcRenderer.invoke('settings:pickConditions'),
+  getContractConditionsUrl: (filePath: string) => ipcRenderer.invoke('settings:getConditionsUrl', filePath),
+  removeContractConditionsImage: (filePath: string) => ipcRenderer.invoke('settings:removeConditions', filePath),
 
   getLicenseStatus: () => ipcRenderer.invoke('license:status'),
   activateLicense: (key: string) => ipcRenderer.invoke('license:activate', key),

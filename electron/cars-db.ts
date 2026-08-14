@@ -1,10 +1,14 @@
 import type { Database } from 'sql.js'
+import path from 'node:path'
 import {
   deleteCarStorage,
   deleteFileIfExists,
   fileExists,
   moveToCarStorage,
 } from './storage'
+import { deleteExpenseStorage } from './expense-storage'
+import { syncAllCarsLastVidange, syncCarLastVidange } from './vidange-db'
+import { agentLog } from './debug-log'
 
 export type CarCategory = 'economique' | 'compacte' | 'suv' | '4x4' | 'monospace'
 export type CarTransmission = 'manuelle' | 'automatique'
@@ -38,6 +42,10 @@ export type CarRecord = {
   mileage: number
   fuel_level: string
   condition_notes: string
+  vidange_interval_km: number
+  vidange_interval_months: number
+  vidange_last_date: string
+  vidange_last_mileage: number
   doc_carte_grise_path: string
   doc_carte_grise_expiry: string
   doc_assurance_path: string
@@ -88,6 +96,10 @@ export type CarInput = {
   mileage?: number
   fuel_level?: string
   condition_notes?: string
+  vidange_interval_km?: number
+  vidange_interval_months?: number
+  vidange_last_date?: string
+  vidange_last_mileage?: number
   doc_carte_grise_path?: string
   doc_carte_grise_expiry?: string
   doc_assurance_path?: string
@@ -138,12 +150,27 @@ function statusToAvailable(status: CarComputedStatus): number {
 
 const RETURN_DATE_SQL = `
   (
-    SELECT COALESCE(NULLIF(ct.return_at, ''), ct.end_date) FROM contracts ct
-    WHERE ct.car_id = c.id
-      AND ct.status = 'active'
-      AND ct.deleted_at IS NULL
-      AND date('now') BETWEEN ct.start_date AND ct.end_date
-    ORDER BY COALESCE(NULLIF(ct.return_at, ''), ct.end_date) ASC
+    SELECT d FROM (
+      SELECT COALESCE(NULLIF(ct.return_at, ''), ct.end_date) AS d
+      FROM contracts ct
+      WHERE ct.car_id = c.id
+        AND ct.status = 'active'
+        AND ct.deleted_at IS NULL
+      UNION ALL
+      SELECT r.return_date AS d
+      FROM reservations r
+      WHERE r.car_id = c.id
+        AND r.status IN ('pending', 'confirmed')
+        AND datetime(r.return_date) > datetime('now')
+        AND NOT EXISTS (
+          SELECT 1 FROM contracts c2
+          WHERE c2.reservation_id = r.id
+            AND c2.deleted_at IS NULL
+            AND c2.status IN ('closed', 'cancelled')
+        )
+    )
+    WHERE d IS NOT NULL AND TRIM(d) != ''
+    ORDER BY datetime(d) ASC
     LIMIT 1
   )
 `
@@ -206,6 +233,10 @@ export function createCarsSchema(db: Database) {
       mileage INTEGER DEFAULT 0,
       fuel_level TEXT DEFAULT '',
       condition_notes TEXT DEFAULT '',
+      vidange_interval_km INTEGER DEFAULT 10000,
+      vidange_interval_months INTEGER DEFAULT 6,
+      vidange_last_date TEXT DEFAULT '',
+      vidange_last_mileage INTEGER DEFAULT 0,
       doc_carte_grise_path TEXT DEFAULT '',
       doc_carte_grise_expiry TEXT DEFAULT '',
       doc_assurance_path TEXT DEFAULT '',
@@ -342,6 +373,10 @@ function normalizeCarInput(data: CarInput) {
     mileage: data.mileage ?? 0,
     fuel_level: data.fuel_level ?? '',
     condition_notes: data.condition_notes ?? '',
+    vidange_interval_km: Math.max(0, Number(data.vidange_interval_km ?? 10000) || 0),
+    vidange_interval_months: Math.max(0, Number(data.vidange_interval_months ?? 6) || 0),
+    vidange_last_date: data.vidange_last_date ?? '',
+    vidange_last_mileage: Math.max(0, Number(data.vidange_last_mileage ?? 0) || 0),
     doc_carte_grise_path: data.doc_carte_grise_path ?? '',
     doc_carte_grise_expiry: data.doc_carte_grise_expiry ?? '',
     doc_assurance_path: data.doc_assurance_path ?? '',
@@ -411,6 +446,43 @@ function finalizeDocumentPaths(carId: number, data: ReturnType<typeof normalizeC
   return result
 }
 
+/** Keep existing document files when the form sends a blank or display-only basename. */
+function mergeDocumentPaths(
+  existing: CarRecord,
+  next: ReturnType<typeof normalizeCarInput>,
+): ReturnType<typeof normalizeCarInput> {
+  const merged = { ...next }
+  for (const col of DOC_COLUMNS) {
+    if (!col.endsWith('_path')) continue
+    const key = col as keyof typeof merged
+    const incoming = String(merged[key] ?? '')
+    const previous = String(existing[col as keyof CarRecord] ?? '')
+    if (!incoming) {
+      ;(merged as unknown as Record<string, string>)[col] = previous
+      continue
+    }
+    // Display basename only (no path separators) and already stored under previous path.
+    if (
+      previous &&
+      !incoming.includes('/') &&
+      !incoming.includes('\\') &&
+      (previous.endsWith(incoming) || path.basename(previous) === incoming)
+    ) {
+      ;(merged as unknown as Record<string, string>)[col] = previous
+    }
+  }
+  for (const col of DOC_COLUMNS) {
+    if (!col.endsWith('_expiry')) continue
+    const key = col as keyof typeof merged
+    if (merged[key] === undefined || merged[key] === null) {
+      ;(merged as unknown as Record<string, string>)[col] = String(
+        existing[col as keyof CarRecord] ?? '',
+      )
+    }
+  }
+  return merged
+}
+
 function deleteRemovedDocuments(
   previous: CarRecord | null,
   next: ReturnType<typeof normalizeCarInput>,
@@ -424,35 +496,141 @@ function deleteRemovedDocuments(
   }
 }
 
-export function syncAllCarStatuses(helpers: DbHelpers) {
-  const cars = helpers.queryAll<{ id: number; status: string }>(
-    "SELECT id, status FROM cars WHERE status != 'hors_service'",
+/** Keep the linked active/closed contract in sync when car state is edited. */
+function syncContractHandoverFromCar(
+  helpers: DbHelpers,
+  carId: number,
+  data: { mileage: number; fuel_level: string; condition_notes: string },
+) {
+  const active = helpers.queryOne<{
+    id: number
+    status: string
+    departure_mileage: number
+    return_mileage: number
+  }>(
+    `SELECT id, status, departure_mileage, return_mileage FROM contracts
+     WHERE car_id = ? AND deleted_at IS NULL AND status = 'active'
+     ORDER BY id DESC
+     LIMIT 1`,
+    [carId],
   )
-  const t = helpers.now()
 
-  for (const car of cars) {
-    const activeContract = helpers.queryOne(
-      `SELECT id FROM contracts
-       WHERE car_id = ? AND status = 'active' AND deleted_at IS NULL LIMIT 1`,
-      [car.id],
+  const closed = !active
+    ? helpers.queryOne<{
+        id: number
+        status: string
+        departure_mileage: number
+        return_mileage: number
+      }>(
+        `SELECT id, status, departure_mileage, return_mileage FROM contracts
+         WHERE car_id = ? AND deleted_at IS NULL AND status = 'closed'
+         ORDER BY datetime(COALESCE(NULLIF(closed_at, ''), updated_at)) DESC, id DESC
+         LIMIT 1`,
+        [carId],
+      )
+    : null
+
+  const draft = !active && !closed
+    ? helpers.queryOne<{
+        id: number
+        status: string
+        departure_mileage: number
+        return_mileage: number
+      }>(
+        `SELECT id, status, departure_mileage, return_mileage FROM contracts
+         WHERE car_id = ? AND deleted_at IS NULL AND status = 'draft'
+         ORDER BY datetime(updated_at) DESC, id DESC
+         LIMIT 1`,
+        [carId],
+      )
+    : null
+
+  const latest = active || closed || draft
+  if (!latest) return
+
+  const mileage = Math.max(0, Number(data.mileage) || 0)
+  const fuel = data.fuel_level ?? ''
+  const notes = data.condition_notes ?? ''
+  const t = helpers.now()
+  const hasReturn = latest.status === 'closed' || Number(latest.return_mileage ?? 0) > 0
+
+  if (hasReturn) {
+    const safeMileage = Math.max(Number(latest.departure_mileage ?? 0), mileage)
+    helpers.run(
+      `UPDATE contracts SET
+         return_mileage = ?,
+         return_fuel_level = COALESCE(NULLIF(?, ''), return_fuel_level),
+         return_notes = COALESCE(NULLIF(?, ''), return_notes),
+         updated_at = ?
+       WHERE id = ?`,
+      [safeMileage, fuel, notes, t, latest.id],
     )
-    const activeReservation = helpers.queryOne(
-      `SELECT id FROM reservations
-       WHERE car_id = ? AND status IN ('pending', 'confirmed')
-         AND datetime(return_date) > datetime('now')
-       LIMIT 1`,
-      [car.id],
-    )
-    const nextStatus = activeContract || activeReservation ? 'louee' : 'disponible'
-    if (car.status !== nextStatus) {
-      helpers.run('UPDATE cars SET status = ?, is_available = ?, updated_at = ? WHERE id = ?', [
-        nextStatus,
-        nextStatus === 'disponible' ? 1 : 0,
-        t,
-        car.id,
-      ])
-    }
+    return
   }
+
+  helpers.run(
+    `UPDATE contracts SET
+       departure_mileage = ?,
+       departure_fuel_level = COALESCE(NULLIF(?, ''), departure_fuel_level),
+       departure_notes = COALESCE(NULLIF(?, ''), departure_notes),
+       updated_at = ?
+     WHERE id = ?`,
+    [mileage, fuel, notes, t, latest.id],
+  )
+}
+
+export function syncCarAvailability(helpers: DbHelpers, carId: number) {
+  const car = helpers.queryOne<{ status: string }>('SELECT status FROM cars WHERE id = ?', [carId])
+  if (!car || car.status === 'hors_service') return
+
+  const activeContract = helpers.queryOne(
+    `SELECT id FROM contracts
+     WHERE car_id = ? AND status = 'active' AND deleted_at IS NULL LIMIT 1`,
+    [carId],
+  )
+  // Ignore reservations already closed via a non-deleted closed/cancelled contract
+  const activeReservation = helpers.queryOne<{ id: number; pickup_date: string }>(
+    `SELECT r.id, r.pickup_date FROM reservations r
+     WHERE r.car_id = ? AND r.status IN ('pending', 'confirmed')
+       AND datetime(r.return_date) > datetime('now')
+       AND NOT EXISTS (
+         SELECT 1 FROM contracts c
+         WHERE c.reservation_id = r.id
+           AND c.deleted_at IS NULL
+           AND c.status IN ('closed', 'cancelled')
+       )
+     LIMIT 1`,
+    [carId],
+  )
+  const nextStatus = activeContract || activeReservation ? 'louee' : 'disponible'
+  // #region agent log
+  if (activeReservation && !activeContract) {
+    const pickupFuture = new Date(activeReservation.pickup_date).getTime() > Date.now()
+    agentLog('A', 'cars-db.ts:syncCarAvailability', 'Car status from reservation only', {
+      carId,
+      prev: car.status,
+      next: nextStatus,
+      reservationId: activeReservation.id,
+      pickup_date: activeReservation.pickup_date,
+      pickupStillFuture: pickupFuture,
+    })
+  }
+  // #endregion
+  if (car.status === nextStatus) return
+
+  helpers.run('UPDATE cars SET status = ?, is_available = ?, updated_at = ? WHERE id = ?', [
+    nextStatus,
+    nextStatus === 'disponible' ? 1 : 0,
+    helpers.now(),
+    carId,
+  ])
+}
+
+export function syncAllCarStatuses(helpers: DbHelpers) {
+  const cars = helpers.queryAll<{ id: number }>(
+    "SELECT id FROM cars WHERE status != 'hors_service'",
+  )
+  for (const car of cars) syncCarAvailability(helpers, car.id)
 }
 
 export function createCarsApi(helpers: DbHelpers) {
@@ -470,6 +648,9 @@ export function createCarsApi(helpers: DbHelpers) {
     },
 
     listCars(filters?: CarFilters): CarListItem[] {
+      // Align denormalized last_* so list vidange badges match history.
+      syncAllCarsLastVidange(helpers)
+
       let sql = `
         SELECT c.*,
           ${STATUS_SQL} as computed_status,
@@ -502,6 +683,7 @@ export function createCarsApi(helpers: DbHelpers) {
     },
 
     getCar(id: number): CarDetail | null {
+      syncCarLastVidange(helpers, id)
       const car = helpers.queryOne<CarDetail>(
         `SELECT c.*,
           ${STATUS_SQL} as computed_status,
@@ -528,14 +710,14 @@ export function createCarsApi(helpers: DbHelpers) {
         `INSERT INTO cars (
           name, brand, model, year, color, plate_number, category, price_per_day,
           transmission, seats, fuel, bags, badge, status, is_available, mileage, fuel_level,
-          condition_notes,
+          condition_notes, vidange_interval_km, vidange_interval_months, vidange_last_date, vidange_last_mileage,
           doc_carte_grise_path, doc_carte_grise_expiry,
           doc_assurance_path, doc_assurance_expiry,
           doc_controle_technique_path, doc_controle_technique_expiry,
           doc_vignette_path, doc_vignette_expiry,
           doc_autorisation_path, doc_autorisation_expiry,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           normalized.name,
           normalized.brand,
@@ -555,6 +737,10 @@ export function createCarsApi(helpers: DbHelpers) {
           normalized.mileage,
           normalized.fuel_level,
           normalized.condition_notes,
+          normalized.vidange_interval_km,
+          normalized.vidange_interval_months,
+          normalized.vidange_last_date,
+          normalized.vidange_last_mileage,
           '',
           normalized.doc_carte_grise_expiry,
           '',
@@ -596,9 +782,10 @@ export function createCarsApi(helpers: DbHelpers) {
 
       const normalized = normalizeCarInput(data)
       assertUniquePlate(helpers, normalized.plate_number, id)
-      deleteRemovedDocuments(existing, normalized)
+      const withExistingDocs = mergeDocumentPaths(existing, normalized)
+      deleteRemovedDocuments(existing, withExistingDocs)
 
-      const withDocs = finalizeDocumentPaths(id, normalized)
+      const withDocs = finalizeDocumentPaths(id, withExistingDocs)
       const t = helpers.now()
 
       helpers.run(
@@ -607,6 +794,7 @@ export function createCarsApi(helpers: DbHelpers) {
           category = ?, price_per_day = ?, transmission = ?, seats = ?, fuel = ?,
           bags = ?, badge = ?, status = ?, is_available = ?, mileage = ?, fuel_level = ?,
           condition_notes = ?,
+          vidange_interval_km = ?, vidange_interval_months = ?,
           doc_carte_grise_path = ?, doc_carte_grise_expiry = ?,
           doc_assurance_path = ?, doc_assurance_expiry = ?,
           doc_controle_technique_path = ?, doc_controle_technique_expiry = ?,
@@ -630,9 +818,12 @@ export function createCarsApi(helpers: DbHelpers) {
           withDocs.badge,
           withDocs.status,
           withDocs.is_available,
-          withDocs.mileage,
+          // Never rewind odometer below current recorded mileage.
+          Math.max(Number(existing.mileage ?? 0), Number(withDocs.mileage ?? 0)),
           withDocs.fuel_level,
           withDocs.condition_notes,
+          withDocs.vidange_interval_km,
+          withDocs.vidange_interval_months,
           withDocs.doc_carte_grise_path,
           withDocs.doc_carte_grise_expiry,
           withDocs.doc_assurance_path,
@@ -647,6 +838,20 @@ export function createCarsApi(helpers: DbHelpers) {
           id,
         ],
       )
+
+      const nextMileage = Math.max(Number(existing.mileage ?? 0), Number(withDocs.mileage ?? 0))
+      const stateChanged =
+        nextMileage !== Number(existing.mileage ?? 0) ||
+        String(withDocs.fuel_level ?? '') !== String(existing.fuel_level ?? '') ||
+        String(withDocs.condition_notes ?? '') !== String(existing.condition_notes ?? '')
+
+      if (stateChanged) {
+        syncContractHandoverFromCar(helpers, id, {
+          mileage: nextMileage,
+          fuel_level: withDocs.fuel_level ?? '',
+          condition_notes: withDocs.condition_notes ?? '',
+        })
+      }
 
       syncCarImages(helpers, id, data.images)
       return this.getCar(id)
@@ -690,6 +895,18 @@ export function createCarsApi(helpers: DbHelpers) {
       }
 
       helpers.run('DELETE FROM car_images WHERE car_id = ?', [id])
+      // sql.js FK CASCADE is off by default — delete vidange history explicitly.
+      const linkedVidanges = helpers.queryAll<{ expense_id: number | null }>(
+        'SELECT expense_id FROM car_vidanges WHERE car_id = ?',
+        [id],
+      )
+      for (const row of linkedVidanges) {
+        if (row.expense_id) {
+          deleteExpenseStorage(row.expense_id)
+          helpers.run('DELETE FROM expenses WHERE id = ?', [row.expense_id])
+        }
+      }
+      helpers.run('DELETE FROM car_vidanges WHERE car_id = ?', [id])
       helpers.run('UPDATE expenses SET car_id = NULL WHERE car_id = ?', [id])
       helpers.run('DELETE FROM cars WHERE id = ?', [id])
       deleteCarStorage(id)
@@ -704,26 +921,33 @@ export function createCarsApi(helpers: DbHelpers) {
       return { ok: true }
     },
 
-    isCarRentable(carId: number, startDate: string, endDate: string) {
+    isCarRentable(
+      carId: number,
+      startDate: string,
+      endDate: string,
+      excludeReservationId?: number | null,
+    ) {
       const car = helpers.queryOne<CarRecord>('SELECT * FROM cars WHERE id = ?', [carId])
       if (!car) throw new Error('CAR_NOT_FOUND')
-      if (car.status !== 'disponible') return false
+      if (car.status === 'hors_service') return false
 
       const contractOverlap = helpers.queryOne(
         `SELECT id FROM contracts
          WHERE car_id = ? AND status = 'active' AND deleted_at IS NULL
+           AND (? IS NULL OR reservation_id IS NULL OR reservation_id != ?)
            AND NOT (end_date < ? OR start_date > ?)
          LIMIT 1`,
-        [carId, startDate, endDate],
+        [carId, excludeReservationId ?? null, excludeReservationId ?? 0, startDate, endDate],
       )
       if (contractOverlap) return false
 
       const reservationOverlap = helpers.queryOne(
         `SELECT id FROM reservations
          WHERE car_id = ? AND status IN ('pending', 'confirmed')
+           AND id != COALESCE(?, -1)
            AND NOT (return_date <= ? OR pickup_date >= ?)
          LIMIT 1`,
-        [carId, startDate, endDate],
+        [carId, excludeReservationId ?? null, startDate, endDate],
       )
       return !reservationOverlap
     },

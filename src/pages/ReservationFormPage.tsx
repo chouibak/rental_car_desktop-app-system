@@ -62,7 +62,7 @@ const emptyForm = () => ({
   daily_rate: 0,
   deposit_amount: 0,
   deposit_status: 'pending' as DepositStatus,
-  status: 'pending' as ReservationStatus,
+  status: 'confirmed' as ReservationStatus,
   payment_status: 'unpaid' as PaymentStatus,
   paid_amount: 0,
 })

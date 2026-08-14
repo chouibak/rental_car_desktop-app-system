@@ -1,10 +1,11 @@
 import type { Database } from 'sql.js'
 import type { PaymentStatus, DepositStatus } from './reservations-db'
+import { datePrefixEquals, localYmd, localYearMonth, roundMoney } from './local-date'
 import {
   getReservationRentalPaid,
+  queryUnpaidTotal,
   syncAllReservationPaymentStatuses,
   syncReservationPaymentStatus,
-  UNPAID_RESERVATIONS_PAID_SUBQUERY,
 } from './payment-sync'
 
 export { syncAllReservationPaymentStatuses, syncReservationPaymentStatus }
@@ -203,7 +204,7 @@ export function createReservationPaymentsApi(helpers: DbHelpers) {
 
   return {
     listReservationPayments(filters?: ReservationPaymentFilters) {
-      let sql = `${listSql} WHERE 1=1`
+      let sql = `${listSql} WHERE r.status != 'cancelled'`
       const params: unknown[] = []
 
       if (filters?.q) {
@@ -349,51 +350,46 @@ export function createReservationPaymentsApi(helpers: DbHelpers) {
     },
 
     getPaymentStats(): PaymentStats {
-      const today = new Date().toISOString().slice(0, 10)
-      const monthPrefix = today.slice(0, 7)
+      const today = localYmd()
+      const monthPrefix = localYearMonth()
 
       const todayReservation = helpers.queryOne<{ total: number; count: number }>(
-        `SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
-         FROM reservation_payments
-         WHERE type = 'rental' AND status = 'completed' AND paid_at = ?`,
+        `SELECT COALESCE(SUM(p.amount), 0) as total, COUNT(*) as count
+         FROM reservation_payments p
+         INNER JOIN reservations r ON r.id = p.reservation_id AND r.status != 'cancelled'
+         WHERE p.type = 'rental' AND p.status = 'completed' AND ${datePrefixEquals('p.paid_at', today)}`,
         [today],
       )
 
       const todayContract = helpers.queryOne<{ total: number; count: number }>(
-        `SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
-         FROM payments WHERE paid_at = ?`,
+        `SELECT COALESCE(SUM(p.amount), 0) as total, COUNT(*) as count
+         FROM payments p
+         INNER JOIN contracts c ON c.id = p.contract_id AND c.deleted_at IS NULL
+         WHERE ${datePrefixEquals('p.paid_at', today)}`,
         [today],
       )
 
       const monthReservation = helpers.queryOne<{ total: number }>(
-        `SELECT COALESCE(SUM(amount), 0) as total
-         FROM reservation_payments
-         WHERE type = 'rental' AND status = 'completed' AND paid_at LIKE ?`,
-        [`${monthPrefix}%`],
+        `SELECT COALESCE(SUM(p.amount), 0) as total
+         FROM reservation_payments p
+         INNER JOIN reservations r ON r.id = p.reservation_id AND r.status != 'cancelled'
+         WHERE p.type = 'rental' AND p.status = 'completed' AND ${datePrefixEquals('p.paid_at', monthPrefix)}`,
+        [monthPrefix],
       )
 
       const monthContract = helpers.queryOne<{ total: number }>(
-        `SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE paid_at LIKE ?`,
-        [`${monthPrefix}%`],
-      )
-
-      const unpaidRow = helpers.queryOne<{ total: number }>(
-        `SELECT COALESCE(SUM(
-          CASE
-            WHEN r.total_amount > COALESCE(p.paid, 0) THEN r.total_amount - COALESCE(p.paid, 0)
-            ELSE 0
-          END
-        ), 0) as total
-         FROM reservations r
-         LEFT JOIN (${UNPAID_RESERVATIONS_PAID_SUBQUERY}) p ON p.reservation_id = r.id
-         WHERE r.status != 'cancelled'`,
+        `SELECT COALESCE(SUM(p.amount), 0) as total
+         FROM payments p
+         INNER JOIN contracts c ON c.id = p.contract_id AND c.deleted_at IS NULL
+         WHERE ${datePrefixEquals('p.paid_at', monthPrefix)}`,
+        [monthPrefix],
       )
 
       return {
-        today_revenue: (todayReservation?.total ?? 0) + (todayContract?.total ?? 0),
+        today_revenue: roundMoney((todayReservation?.total ?? 0) + (todayContract?.total ?? 0)),
         today_payments_count: (todayReservation?.count ?? 0) + (todayContract?.count ?? 0),
-        month_revenue: (monthReservation?.total ?? 0) + (monthContract?.total ?? 0),
-        unpaid_total: unpaidRow?.total ?? 0,
+        month_revenue: roundMoney((monthReservation?.total ?? 0) + (monthContract?.total ?? 0)),
+        unpaid_total: roundMoney(queryUnpaidTotal(helpers)),
       }
     },
   }

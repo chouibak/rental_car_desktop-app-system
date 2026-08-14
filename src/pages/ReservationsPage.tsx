@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ReservationMonthCalendar } from '../components/ReservationMonthCalendar'
-import { IconChevronRight, IconEdit, IconPlus, IconSearch, IconTrash } from '../components/icons'
+import { IconEdit, IconPlus, IconSearch, IconTrash } from '../components/icons'
 import { EmptyState, PageHeader, PaymentBadge, StatusBadge } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { monthBoundaryIsoRange, startOfMonth } from '../utils/calendar'
@@ -100,7 +100,7 @@ export default function ReservationsPage() {
   }
 
   return (
-    <div>
+    <div className="reservations-page">
       <PageHeader title={t.reservations} subtitle={t.reservationsSubtitle}>
         <div className="toolbar-filters">
           <div className="search-field search-field-sm">
@@ -112,7 +112,11 @@ export default function ReservationsPage() {
               onChange={(e) => setQ(e.target.value)}
             />
           </div>
-          <select className="select select-sm" value={status} onChange={(e) => setStatus(e.target.value as ReservationStatus | '')}>
+          <select
+            className="select select-sm"
+            value={status}
+            onChange={(e) => setStatus(e.target.value as ReservationStatus | '')}
+          >
             <option value="">{t.status}</option>
             {STATUSES.map((s) => (
               <option key={s} value={s}>
@@ -120,7 +124,11 @@ export default function ReservationsPage() {
               </option>
             ))}
           </select>
-          <select className="select select-sm" value={carId} onChange={(e) => setCarId(e.target.value ? Number(e.target.value) : '')}>
+          <select
+            className="select select-sm"
+            value={carId}
+            onChange={(e) => setCarId(e.target.value ? Number(e.target.value) : '')}
+          >
             <option value="">{t.car}</option>
             {cars.map((c) => (
               <option key={c.id} value={c.id}>
@@ -141,14 +149,26 @@ export default function ReservationsPage() {
             ))}
           </select>
         </div>
-        <div className="toolbar-actions">
-          <button className={`btn secondary sm ${view === 'list' ? 'active' : ''}`} onClick={() => setView('list')}>
+
+        <div className="toolbar-view-toggle" role="group" aria-label={t.listView}>
+          <button
+            type="button"
+            className={`btn secondary sm ${view === 'list' ? 'active' : ''}`}
+            onClick={() => setView('list')}
+          >
             {t.listView}
           </button>
-          <button className={`btn secondary sm ${view === 'calendar' ? 'active' : ''}`} onClick={() => setView('calendar')}>
+          <button
+            type="button"
+            className={`btn secondary sm ${view === 'calendar' ? 'active' : ''}`}
+            onClick={() => setView('calendar')}
+          >
             {t.calendarView}
           </button>
-          <button className="btn sm" onClick={() => navigate('/reservations/new')}>
+        </div>
+
+        <div className="toolbar-actions">
+          <button type="button" className="btn" onClick={() => navigate('/reservations/new')}>
             <IconPlus size={16} />
             {t.newReservation}
           </button>
@@ -170,14 +190,13 @@ export default function ReservationsPage() {
                   <th>{t.remaining}</th>
                   <th>{t.status}</th>
                   <th>{t.paymentStatus}</th>
-                  <th>{t.actions}</th>
-                  <th aria-hidden />
+                  <th className="col-actions">{t.actions}</th>
                 </tr>
               </thead>
               <tbody>
                 {reservations.length === 0 && (
                   <tr>
-                    <td colSpan={11}>
+                    <td colSpan={10}>
                       <EmptyState message={t.noData} />
                     </td>
                   </tr>
@@ -188,51 +207,57 @@ export default function ReservationsPage() {
                   const paymentStatus = reservationPaymentStatus(paid, r.total_amount)
 
                   return (
-                  <tr
-                    key={r.id}
-                    className="clickable-row"
-                    onClick={() => navigate(`/reservations/${r.id}`)}
-                  >
-                    <td>
-                      <strong>{r.reference}</strong>
-                      {(r.contract_count ?? 0) > 1 ? (
-                        <div className="muted-text text-danger">{t.duplicateContractWarning}</div>
-                      ) : null}
-                    </td>
-                    <td>{r.customer_name}</td>
-                    <td>
-                      {r.car_name}
-                      <div className="muted-text">{r.car_plate}</div>
-                    </td>
-                    <td>
-                      {formatDatetime(r.pickup_date)}
-                      <div className="muted-text">→ {formatDatetime(r.return_date)}</div>
-                    </td>
-                    <td>{money(r.total_amount)}</td>
-                    <td>{money(paid)}</td>
-                    <td className={remaining > 0 ? 'text-danger' : ''}>{money(remaining)}</td>
-                    <td>
-                      <StatusBadge status={r.status} />
-                    </td>
-                    <td>
-                      <PaymentBadge status={paymentStatus} />
-                    </td>
-                    <td>
-                      <div className="row-actions" onClick={(e) => e.stopPropagation()}>
-                        <Link className="btn secondary sm icon-only" to={`/reservations/${r.id}/edit`} title={t.edit}>
-                          <IconEdit size={15} />
-                        </Link>
-                        <button className="btn danger sm icon-only" onClick={() => onDelete(r.id)} title={t.delete}>
-                          <IconTrash size={15} />
-                        </button>
-                      </div>
-                    </td>
-                    <td>
-                      <span className="row-chevron">
-                        <IconChevronRight size={18} />
-                      </span>
-                    </td>
-                  </tr>
+                    <tr
+                      key={r.id}
+                      className="clickable-row"
+                      onClick={() => navigate(`/reservations/${r.id}`)}
+                    >
+                      <td>
+                        <strong>{r.reference}</strong>
+                        {(r.contract_count ?? 0) > 1 ? (
+                          <div className="muted-text text-danger">{t.duplicateContractWarning}</div>
+                        ) : null}
+                      </td>
+                      <td>{r.customer_name}</td>
+                      <td>
+                        {r.car_name}
+                        <div className="muted-text">{r.car_plate}</div>
+                      </td>
+                      <td>
+                        {formatDatetime(r.pickup_date)}
+                        <div className="muted-text">→ {formatDatetime(r.return_date)}</div>
+                      </td>
+                      <td>{money(r.total_amount)}</td>
+                      <td>{money(paid)}</td>
+                      <td className={remaining > 0 ? 'text-danger' : ''}>{money(remaining)}</td>
+                      <td>
+                        <StatusBadge status={r.status} />
+                      </td>
+                      <td>
+                        <PaymentBadge status={paymentStatus} />
+                      </td>
+                      <td className="col-actions">
+                        <div className="row-actions" onClick={(e) => e.stopPropagation()}>
+                          <Link
+                            className="btn secondary sm icon-only"
+                            to={`/reservations/${r.id}/edit`}
+                            title={t.edit}
+                            aria-label={t.edit}
+                          >
+                            <IconEdit size={15} />
+                          </Link>
+                          <button
+                            type="button"
+                            className="btn danger sm icon-only"
+                            onClick={() => onDelete(r.id)}
+                            title={t.delete}
+                            aria-label={t.delete}
+                          >
+                            <IconTrash size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   )
                 })}
               </tbody>

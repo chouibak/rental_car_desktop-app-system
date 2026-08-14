@@ -5,7 +5,9 @@ import { useLang } from '../context/LangContext'
 import type { Notification } from '../types'
 import {
   formatNotificationDate,
+  isDocNotification,
   isReturnNotification,
+  isVidangeNotification,
   notificationActionLabel,
   notificationDetail,
   notificationEntityTag,
@@ -14,7 +16,7 @@ import {
   notificationTitle,
 } from '../utils/notifications'
 
-type Filter = 'all' | 'returns' | 'docs'
+type Filter = 'all' | 'returns' | 'docs' | 'vidange'
 
 export default function NotificationsPage() {
   const { t, lang } = useLang()
@@ -31,14 +33,16 @@ export default function NotificationsPage() {
 
   const filtered = useMemo(() => {
     if (filter === 'returns') return items.filter((item) => isReturnNotification(item.kind))
-    if (filter === 'docs') return items.filter((item) => !isReturnNotification(item.kind))
+    if (filter === 'docs') return items.filter((item) => isDocNotification(item.kind))
+    if (filter === 'vidange') return items.filter((item) => isVidangeNotification(item.kind))
     return items
   }, [filter, items])
 
   const counts = useMemo(
     () => ({
       returns: items.filter((item) => isReturnNotification(item.kind)).length,
-      docs: items.filter((item) => !isReturnNotification(item.kind)).length,
+      docs: items.filter((item) => isDocNotification(item.kind)).length,
+      vidange: items.filter((item) => isVidangeNotification(item.kind)).length,
     }),
     [items],
   )
@@ -62,6 +66,9 @@ export default function NotificationsPage() {
         </button>
         <button type="button" className={filter === 'docs' ? 'active' : ''} onClick={() => setFilter('docs')}>
           {t.notificationGroupDocs} ({counts.docs})
+        </button>
+        <button type="button" className={filter === 'vidange' ? 'active' : ''} onClick={() => setFilter('vidange')}>
+          {t.notificationGroupVidange} ({counts.vidange})
         </button>
       </div>
 

@@ -4,6 +4,7 @@ import { ContractVehicleStateSection, DriverFields } from '../components/Contrac
 import { IconChevronDown } from '../components/icons'
 import { PageHeader } from '../components/ui'
 import { useLang } from '../context/LangContext'
+import { useToast } from '../context/ToastContext'
 import type { Car, Contract, Customer, Chauffeur, Reservation } from '../types'
 import {
   CONTRACT_STATUSES,
@@ -14,11 +15,14 @@ import {
   chauffeurToDriver2Fields,
   customerToDriver1Fields,
   customerToDriver2Fields,
+  emptyDriver2Fields,
   parseDamages,
   parseEquipment,
+  toIsoDatetime,
   toLocalDatetimeValue,
   type ContractDamage,
 } from '../utils/contracts'
+import { deliveryLocationLabel } from '../utils/reservation'
 
 function ContractSection({ title, subtitle, children, grid = 'form-grid' }: { title: string; subtitle?: string; children: ReactNode; grid?: string }) {
   return (
@@ -34,33 +38,6 @@ function ContractSection({ title, subtitle, children, grid = 'form-grid' }: { ti
       </summary>
       <div className={`panel-body ${grid}`}>{children}</div>
     </details>
-  )
-}
-
-function InputWithSuffix({
-  suffix,
-  value,
-  onChange,
-  type = 'text',
-  min,
-}: {
-  suffix: string
-  value: string | number
-  onChange: (value: number) => void
-  type?: string
-  min?: number
-}) {
-  return (
-    <div className="input-suffix-wrap">
-      <input
-        className="input input-with-suffix"
-        type={type}
-        min={min}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
-      <span className="input-suffix">{suffix}</span>
-    </div>
   )
 }
 
@@ -144,7 +121,7 @@ function emptyForm(): FormState {
     reservation_id: '',
     client_id: '',
     car_id: '',
-    status: 'draft',
+    status: 'active',
     contract_date: today(),
     contract_city: '',
     driver1_name: '',
@@ -197,7 +174,7 @@ function emptyForm(): FormState {
     equipment_other: '',
     departure_damages: [],
     return_damages: [],
-    include_damage_photos_in_pdf: true,
+    include_damage_photos_in_pdf: false,
     daily_rate: 0,
     discount: 0,
     deposit_amount: 0,
@@ -272,7 +249,7 @@ function contractToForm(contract: Contract): FormState {
     equipment_other: contract.equipment_other || '',
     departure_damages: parseDamages(contract.departure_damages),
     return_damages: parseDamages(contract.return_damages),
-    include_damage_photos_in_pdf: contract.include_damage_photos_in_pdf !== 0,
+    include_damage_photos_in_pdf: Number(contract.include_damage_photos_in_pdf) === 1,
     daily_rate: contract.daily_rate ?? contract.daily_price ?? 0,
     discount: contract.discount ?? 0,
     deposit_amount: contract.deposit_amount ?? contract.deposit ?? 0,
@@ -294,11 +271,14 @@ export default function ContractFormPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { t, money } = useLang()
+  const { showSuccess } = useToast()
   const isEdit = Boolean(id)
   const [contractNumber, setContractNumber] = useState('')
   const [form, setForm] = useState<FormState>(emptyForm())
   const [customers, setCustomers] = useState<Customer[]>([])
   const [chauffeurs, setChauffeurs] = useState<Chauffeur[]>([])
+  const [driver2ChauffeurId, setDriver2ChauffeurId] = useState<number | ''>('')
+  const [driver2CustomerId, setDriver2CustomerId] = useState<number | ''>('')
   const [cars, setCars] = useState<Car[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [pinnedReservation, setPinnedReservation] = useState<Reservation | null>(null)
@@ -306,6 +286,7 @@ export default function ContractFormPage() {
   const [saving, setSaving] = useState(false)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [error, setError] = useState('')
+  const [paidAmount, setPaidAmount] = useState(0)
 
   useEffect(() => {
     Promise.all([
@@ -371,6 +352,10 @@ export default function ContractFormPage() {
       departure_mileage: car?.mileage ?? 0,
       departure_fuel_level: car?.fuel_level || 'plein',
       departure_notes: car?.condition_notes || '',
+      // Lieu de départ = reservation delivery / pickup location
+      departure_place: reservation.delivery_location?.trim()
+        ? deliveryLocationLabel(reservation.delivery_location, t)
+        : '',
     }
 
     if (reservation.chauffeur_id) {
@@ -413,6 +398,21 @@ export default function ContractFormPage() {
   }, [searchParams, customers, cars, isEdit, form.reservation_id])
 
   useEffect(() => {
+    if (isEdit) return
+    const customerParam = searchParams.get('customer')
+    if (!customerParam || customers.length === 0) return
+    const customerId = Number(customerParam)
+    if (!customerId || form.client_id === customerId) return
+    const customer = customers.find((row) => row.id === customerId)
+    if (!customer) return
+    setForm((current) => ({
+      ...current,
+      client_id: customerId,
+      ...customerToDriver1Fields(customer),
+    }))
+  }, [searchParams, customers, isEdit, form.client_id])
+
+  useEffect(() => {
     if (!isEdit || !id) return
     window.api.getContract(Number(id)).then(async (data) => {
       if (!data) {
@@ -421,6 +421,7 @@ export default function ContractFormPage() {
       }
       setContractNumber(data.contract_number)
       setForm(contractToForm(data))
+      setPaidAmount(Number(data.paid_amount ?? 0))
       if (data.reservation_id) {
         const linked = await window.api.getReservation(data.reservation_id)
         if (linked) setPinnedReservation(linked)
@@ -430,6 +431,7 @@ export default function ContractFormPage() {
   }, [id, isEdit, navigate])
 
   useEffect(() => {
+    if (isEdit) return
     window.api.getSettings().then((settings) => {
       const defaultFranchise = Number(settings.default_franchise_amount || 0)
       setForm((current) => ({
@@ -439,12 +441,13 @@ export default function ContractFormPage() {
         franchise_applies: current.franchise_applies || defaultFranchise > 0,
       }))
     })
-  }, [])
+  }, [isEdit])
 
   const previewTotal = useMemo(
     () => calcContractTotal(form.billed_days, form.daily_rate, form.discount, form.extra_charges),
     [form.billed_days, form.daily_rate, form.discount, form.extra_charges],
   )
+  const remainingUnpaid = Math.max(0, previewTotal - paidAmount)
 
   const copyFromCustomer = () => {
     const customer = customers.find((row) => row.id === form.client_id)
@@ -467,6 +470,8 @@ export default function ContractFormPage() {
   const copyDriver2FromCustomer = (customerId: number) => {
     const customer = customers.find((row) => row.id === customerId)
     if (!customer) return
+    setDriver2CustomerId(customerId)
+    setDriver2ChauffeurId('')
     setForm((current) => ({
       ...current,
       ...customerToDriver2Fields(customer),
@@ -476,9 +481,20 @@ export default function ContractFormPage() {
   const copyDriver2FromChauffeur = (chauffeurId: number) => {
     const chauffeur = chauffeurs.find((row) => row.id === chauffeurId)
     if (!chauffeur) return
+    setDriver2ChauffeurId(chauffeurId)
+    setDriver2CustomerId('')
     setForm((current) => ({
       ...current,
       ...chauffeurToDriver2Fields(chauffeur),
+    }))
+  }
+
+  const clearDriver2 = () => {
+    setDriver2ChauffeurId('')
+    setDriver2CustomerId('')
+    setForm((current) => ({
+      ...current,
+      ...emptyDriver2Fields(),
     }))
   }
 
@@ -520,6 +536,8 @@ export default function ContractFormPage() {
     reservation_id: form.reservation_id || null,
     client_id: Number(form.client_id),
     car_id: Number(form.car_id),
+    departure_at: toIsoDatetime(form.departure_at),
+    return_at: toIsoDatetime(form.return_at),
     equipment: JSON.stringify(form.equipment),
     departure_damages: JSON.stringify(form.departure_damages),
     return_damages: JSON.stringify(form.return_damages),
@@ -540,9 +558,11 @@ export default function ContractFormPage() {
     try {
       if (isEdit && id) {
         await window.api.updateContract(Number(id), buildPayload())
+        showSuccess(t.saveSuccess)
         navigate(`/contracts/${id}`)
       } else {
         const created = await window.api.createContract(buildPayload())
+        showSuccess(t.saveSuccess)
         navigate(`/contracts/${created.id}/edit`)
       }
     } catch (err) {
@@ -569,6 +589,8 @@ export default function ContractFormPage() {
     setPdfLoading(true)
     setError('')
     try {
+      // Persist current form (incl. PDF photo option) before generating
+      await window.api.updateContract(Number(id), buildPayload())
       await window.api.generateContractPdf(Number(id))
     } catch (err) {
       setError(String(err))
@@ -784,39 +806,57 @@ export default function ContractFormPage() {
         </ContractSection>
 
         <ContractSection title={t.driver2}>
-          <div className="field full">
-            <label>{t.chauffeur}</label>
-            <select
-              className="select"
-              defaultValue=""
-              onChange={(e) => {
-                if (e.target.value) copyDriver2FromChauffeur(Number(e.target.value))
-              }}
-            >
-              <option value="">{t.selectChauffeur}</option>
-              {chauffeurs.map((chauffeur) => (
-                <option key={chauffeur.id} value={chauffeur.id}>
-                  {chauffeur.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field full">
-            <label>{t.customer}</label>
-            <select
-              className="select"
-              defaultValue=""
-              onChange={(e) => {
-                if (e.target.value) copyDriver2FromCustomer(Number(e.target.value))
-              }}
-            >
-              <option value="">{t.selectClient}</option>
-              {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.name}
-                </option>
-              ))}
-            </select>
+          <div className="driver2-toolbar">
+            <div className="field">
+              <label>{t.chauffeur}</label>
+              <select
+                className="select"
+                value={driver2ChauffeurId}
+                onChange={(e) => {
+                  const value = e.target.value
+                  if (!value) {
+                    clearDriver2()
+                    return
+                  }
+                  copyDriver2FromChauffeur(Number(value))
+                }}
+              >
+                <option value="">{t.noDriver2}</option>
+                {chauffeurs.map((chauffeur) => (
+                  <option key={chauffeur.id} value={chauffeur.id}>
+                    {chauffeur.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>{t.customer}</label>
+              <select
+                className="select"
+                value={driver2CustomerId}
+                onChange={(e) => {
+                  const value = e.target.value
+                  if (!value) {
+                    clearDriver2()
+                    return
+                  }
+                  copyDriver2FromCustomer(Number(value))
+                }}
+              >
+                <option value="">{t.noDriver2}</option>
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field driver2-clear-field">
+              <label>&nbsp;</label>
+              <button type="button" className="btn secondary" onClick={clearDriver2}>
+                {t.noDriver2}
+              </button>
+            </div>
           </div>
           <DriverFields
             prefix="driver2"
@@ -824,6 +864,9 @@ export default function ContractFormPage() {
             setForm={setForm as Dispatch<SetStateAction<Record<string, unknown>>>}
             t={t}
           />
+          {!form.driver2_name.trim() ? (
+            <p className="muted-text driver2-empty-hint">{t.noDriver2Hint}</p>
+          ) : null}
         </ContractSection>
 
         <ContractSection title={t.vehicleDescription} grid="form-grid-3">
@@ -856,15 +899,13 @@ export default function ContractFormPage() {
             <input className="input" value={form.departure_place} onChange={(e) => setForm({ ...form, departure_place: e.target.value })} />
           </div>
           <div className="field">
-            <label>{t.departureMileage}</label>
-            <InputWithSuffix suffix="km" value={form.departure_mileage} min={0} onChange={(departure_mileage) => setForm({ ...form, departure_mileage })} />
-          </div>
-          <div className="field">
             <label>{t.returnAt}</label>
             <input
               className="input"
               type="datetime-local"
               value={form.return_at}
+              disabled={form.extension_days > 0}
+              title={form.extension_days > 0 ? t.extendRentalHint : undefined}
               onChange={(e) => {
                 setForm({ ...form, return_at: e.target.value })
                 recalcDays(form.departure_at, e.target.value)
@@ -876,20 +917,8 @@ export default function ContractFormPage() {
             <input className="input" value={form.return_place} onChange={(e) => setForm({ ...form, return_place: e.target.value })} />
           </div>
           <div className="field">
-            <label>{t.returnMileage}</label>
-            <InputWithSuffix suffix="km" value={form.return_mileage} min={0} onChange={(return_mileage) => setForm({ ...form, return_mileage })} />
-          </div>
-          <div className="field">
             <label>{t.billedDaysLabel}</label>
             <input className="input" type="number" min={1} value={form.billed_days} onChange={(e) => setForm({ ...form, billed_days: Number(e.target.value) })} />
-          </div>
-          <div className="field">
-            <label>{t.extensionUntil}</label>
-            <input className="input" type="date" value={form.extension_until} onChange={(e) => setForm({ ...form, extension_until: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>{t.extensionDaysLabel}</label>
-            <input className="input" type="number" min={0} value={form.extension_days} onChange={(e) => setForm({ ...form, extension_days: Number(e.target.value) })} />
           </div>
         </ContractSection>
 
@@ -922,41 +951,16 @@ export default function ContractFormPage() {
         <ContractSection title={t.deliveryStateTitle} subtitle={t.vehicleStateSubtitle} grid="vehicle-state-section">
           <ContractVehicleStateSection
             kind="departure"
+            mileage={form.departure_mileage}
             fuelLevel={form.departure_fuel_level}
             notes={form.departure_notes}
             damages={form.departure_damages}
+            onMileageChange={(departure_mileage) => setForm({ ...form, departure_mileage })}
             onFuelChange={(departure_fuel_level) => setForm({ ...form, departure_fuel_level })}
             onNotesChange={(departure_notes) => setForm({ ...form, departure_notes })}
             onDamagesChange={(departure_damages) => setForm({ ...form, departure_damages })}
             t={t}
           />
-        </ContractSection>
-
-        <ContractSection title={t.returnStateTitle} subtitle={t.vehicleStateSubtitle} grid="vehicle-state-section">
-          <ContractVehicleStateSection
-            kind="return"
-            fuelLevel={form.return_fuel_level}
-            notes={form.return_notes}
-            damages={form.return_damages}
-            onFuelChange={(return_fuel_level) => setForm({ ...form, return_fuel_level })}
-            onNotesChange={(return_notes) => setForm({ ...form, return_notes })}
-            onDamagesChange={(return_damages) => setForm({ ...form, return_damages })}
-            t={t}
-          />
-        </ContractSection>
-
-        <ContractSection title={t.pdfOptions}>
-          <div className="field full">
-            <label className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={form.include_damage_photos_in_pdf}
-                onChange={(e) => setForm({ ...form, include_damage_photos_in_pdf: e.target.checked })}
-              />
-              {t.includeDamagePhotos}
-            </label>
-            <p className="field-hint">{t.includeDamagePhotosHint}</p>
-          </div>
         </ContractSection>
 
         <ContractSection title={t.billingSection}>
@@ -1037,6 +1041,21 @@ export default function ContractFormPage() {
             <label>{t.total}</label>
             <strong>{money(previewTotal)}</strong>
           </div>
+          {isEdit ? (
+            <>
+              <div className="field">
+                <label>{t.amountPaid}</label>
+                <strong>{money(paidAmount)}</strong>
+                <p className="field-hint">{t.amountPaidHint}</p>
+              </div>
+              <div className="field">
+                <label>{t.remainingUnpaid}</label>
+                <strong className={remainingUnpaid > 0 ? 'text-danger' : ''}>
+                  {remainingUnpaid > 0 ? money(remainingUnpaid) : t.fullyPaid}
+                </strong>
+              </div>
+            </>
+          ) : null}
         </ContractSection>
 
         <ContractSection title={t.notes}>
@@ -1047,8 +1066,16 @@ export default function ContractFormPage() {
 
         {error && <div className="error panel panel-body">{error}</div>}
 
-        <div className="form-actions">
-          <button type="submit" className="btn" disabled={saving}>
+        <div className="form-actions form-actions--sticky contract-form-actions">
+          <button
+            type="button"
+            className="btn secondary"
+            onClick={() => navigate(isEdit && id ? `/contracts/${id}` : '/contracts')}
+            disabled={saving}
+          >
+            {t.cancel}
+          </button>
+          <button type="submit" className="btn btn-register" disabled={saving}>
             {saving ? t.loading : t.save}
           </button>
         </div>

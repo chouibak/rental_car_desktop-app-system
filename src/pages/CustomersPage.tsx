@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { IconChevronRight, IconEdit, IconPlus, IconSearch, IconTrash } from '../components/icons'
+import { IconEdit, IconPlus, IconSearch, IconTrash } from '../components/icons'
 import { EmptyState, PageHeader } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import type { Customer } from '../types'
@@ -31,21 +31,21 @@ export default function CustomersPage() {
   }
 
   return (
-    <div>
+    <div className="customers-page">
       <PageHeader title={t.customers} subtitle={t.customersSubtitle}>
         <div className="toolbar-filters">
-          <div className="search-field search-field-sm">
+          <div className="search-field">
             <IconSearch size={15} />
             <input
-              className="input input-sm"
-              placeholder={t.search}
+              className="input"
+              placeholder={t.searchCustomer}
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
           </div>
         </div>
         <div className="toolbar-actions">
-          <button className="btn sm" onClick={() => navigate('/customers/new')}>
+          <button type="button" className="btn" onClick={() => navigate('/customers/new')}>
             <IconPlus size={16} />
             {t.addCustomer}
           </button>
@@ -62,14 +62,13 @@ export default function CustomersPage() {
                 <th>{t.email}</th>
                 <th>{t.cin}</th>
                 <th>{t.licenseExpiry}</th>
-                <th>{t.actions}</th>
-                <th aria-hidden />
+                <th className="col-actions">{t.actions}</th>
               </tr>
             </thead>
             <tbody>
               {customers.length === 0 && (
                 <tr>
-                  <td colSpan={7}>
+                  <td colSpan={6}>
                     <EmptyState message={t.noData} />
                   </td>
                 </tr>
@@ -87,28 +86,26 @@ export default function CustomersPage() {
                   <td>{customer.email || '—'}</td>
                   <td>{customer.cin_number || '—'}</td>
                   <td>{formatDisplayDate(customer.license_expiry_date)}</td>
-                  <td>
+                  <td className="col-actions">
                     <div className="row-actions" onClick={(e) => e.stopPropagation()}>
                       <Link
                         className="btn secondary sm icon-only"
                         to={`/customers/${customer.id}/edit`}
                         title={t.edit}
+                        aria-label={t.edit}
                       >
                         <IconEdit size={15} />
                       </Link>
                       <button
+                        type="button"
                         className="btn danger sm icon-only"
                         onClick={() => onDelete(customer.id)}
                         title={t.delete}
+                        aria-label={t.delete}
                       >
                         <IconTrash size={15} />
                       </button>
                     </div>
-                  </td>
-                  <td>
-                    <span className="row-chevron">
-                      <IconChevronRight size={18} />
-                    </span>
                   </td>
                 </tr>
               ))}

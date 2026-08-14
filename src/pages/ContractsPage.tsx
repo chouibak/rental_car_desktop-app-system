@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { IconEdit, IconSearch, IconTrash } from '../components/icons'
+import { IconEdit, IconPlus, IconSearch, IconTrash } from '../components/icons'
 import { EmptyState, PageHeader, StatCard, StatusBadge } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import type { Contract, ContractStats, Reservation } from '../types'
@@ -14,7 +14,6 @@ export default function ContractsPage() {
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [q, setQ] = useState('')
   const [status, setStatus] = useState('')
-  const [overdueOnly, setOverdueOnly] = useState(false)
   const [reservationModalOpen, setReservationModalOpen] = useState(false)
   const [selectedReservationId, setSelectedReservationId] = useState<number | ''>('')
   const [error, setError] = useState('')
@@ -30,10 +29,9 @@ export default function ContractsPage() {
       window.api.listContracts({
         q: q || undefined,
         status: status || undefined,
-        overdue: overdueOnly || undefined,
       }),
       window.api.getContractStats(),
-      window.api.listReservations({ status: 'confirmed' }),
+      window.api.listReservations(),
       window.api.listContracts(),
     ])
 
@@ -54,9 +52,7 @@ export default function ContractsPage() {
 
   useEffect(() => {
     load()
-  }, [q, status, overdueOnly])
-
-  const filteredCount = useMemo(() => contracts.length, [contracts])
+  }, [q, status])
 
   const onDelete = async (contract: Contract) => {
     const message = t.confirmDeleteContract.replace('{number}', contract.contract_number)
@@ -72,40 +68,50 @@ export default function ContractsPage() {
   return (
     <div className="contracts-page">
       <PageHeader title={t.contracts} subtitle={t.contractsSubtitle}>
-        <div className="toolbar">
-          <div className="toolbar-filters">
-            <div className="search-field search-field-sm">
-              <IconSearch size={15} />
-              <input className="input input-sm" placeholder={t.search} value={q} onChange={(e) => setQ(e.target.value)} />
-            </div>
-            <select className="select select-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="">{t.all}</option>
-              <option value="draft">{t.draft}</option>
-              <option value="active">{t.active}</option>
-              <option value="closed">{t.closed}</option>
-              <option value="cancelled">{t.cancelled}</option>
-            </select>
-            <label className="checkbox-row toolbar-checkbox">
-              <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} />
-              {t.overdueContracts}
-            </label>
+        <div className="toolbar-filters">
+          <div className="search-field search-field-sm">
+            <IconSearch size={15} />
+            <input
+              className="input input-sm"
+              placeholder={t.search}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
           </div>
-          <div className="toolbar-actions">
-            <button type="button" className="btn secondary" onClick={() => setReservationModalOpen(true)}>
-              {t.contractFromReservation}
-            </button>
-            <Link className="btn" to="/contracts/new">
-              {t.newContract}
-            </Link>
-          </div>
+          <select className="select select-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="">{t.all}</option>
+            <option value="draft">{t.draft}</option>
+            <option value="active">{t.active}</option>
+            <option value="closed">{t.closed}</option>
+            <option value="cancelled">{t.cancelled}</option>
+          </select>
+        </div>
+        <div className="toolbar-actions">
+          <button type="button" className="btn secondary sm" onClick={() => setReservationModalOpen(true)}>
+            {t.contractFromReservation}
+          </button>
+          <Link className="btn sm" to="/contracts/new">
+            <IconPlus size={15} />
+            {t.newContract}
+          </Link>
         </div>
       </PageHeader>
 
       {stats && (
-        <div className="cards cards--3">
+        <div className="cards cards--4">
           <StatCard label={t.activeContractsCount} value={stats.active} tone="info" />
-          <StatCard label={t.overdueContracts} value={stats.overdue} tone="warn" />
-          <StatCard label={t.contracts} value={filteredCount} />
+          <StatCard
+            label={t.unpaidStats}
+            value={money(stats.unpaid_amount)}
+            hint={
+              stats.unpaid_count > 0
+                ? `${stats.unpaid_count} ${t.unpaidContractsCount.toLowerCase()}`
+                : t.fullyPaid
+            }
+            tone={stats.unpaid_amount > 0 ? 'warn' : 'success'}
+          />
+          <StatCard label={t.totalPaidAmount} value={money(stats.paid_amount)} tone="success" />
+          <StatCard label={t.totalContractsCount} value={stats.total} />
         </div>
       )}
 
@@ -121,8 +127,8 @@ export default function ContractsPage() {
                 <th>{t.returnAt}</th>
                 <th>{t.billedDays}</th>
                 <th>{t.total}</th>
-                <th>{t.paid}</th>
-                <th>{t.remaining}</th>
+                <th>{t.amountPaid}</th>
+                <th>{t.remainingUnpaid}</th>
                 <th>{t.status}</th>
                 <th>{t.actions}</th>
                 <th aria-hidden />
@@ -220,7 +226,12 @@ export default function ContractsPage() {
               <button type="button" className="btn secondary" onClick={() => setReservationModalOpen(false)}>
                 {t.cancel}
               </button>
-              <button type="button" className="btn" disabled={!selectedReservationId} onClick={createFromReservation}>
+              <button
+                type="button"
+                className="btn"
+                disabled={!selectedReservationId}
+                onClick={createFromReservation}
+              >
                 {t.continueAction}
               </button>
             </footer>

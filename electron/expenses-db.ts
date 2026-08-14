@@ -1,6 +1,7 @@
 import type { Database } from 'sql.js'
 import { deleteFileIfExists } from './storage'
 import { deleteExpenseStorage, moveToExpenseStorage } from './expense-storage'
+import { datePrefixEquals, localYearMonth } from './local-date'
 
 export type ExpenseCategory =
   | 'fuel'
@@ -295,13 +296,15 @@ export function createExpensesApi(helpers: DbHelpers) {
 
       if (existing.receipt_path) deleteFileIfExists(existing.receipt_path)
       deleteExpenseStorage(id)
+      // Keep vidange ↔ expense link consistent when expense is removed from Dépenses tab.
+      helpers.run('UPDATE car_vidanges SET expense_id = NULL WHERE expense_id = ?', [id])
       helpers.run('DELETE FROM expenses WHERE id = ?', [id])
       return { ok: true }
     },
 
     getExpenseStats(filters?: ExpenseFilters): ExpenseStats {
       const { where, params } = buildExpenseWhere(filters)
-      const month = new Date().toISOString().slice(0, 7)
+      const month = localYearMonth()
 
       const totals = helpers.queryOne<{ total: number; count: number }>(
         `SELECT COALESCE(SUM(e.amount), 0) as total, COUNT(*) as count
@@ -309,8 +312,9 @@ export function createExpensesApi(helpers: DbHelpers) {
         params,
       )
 
-      const monthClauses = where ? `${where} AND e.expense_date LIKE ?` : 'WHERE e.expense_date LIKE ?'
-      const monthParams = [...params, `${month}%`]
+      const monthMatch = datePrefixEquals('e.expense_date', month)
+      const monthClauses = where ? `${where} AND ${monthMatch}` : `WHERE ${monthMatch}`
+      const monthParams = [...params, month]
 
       const monthTotals = helpers.queryOne<{ total: number; count: number }>(
         `SELECT COALESCE(SUM(e.amount), 0) as total, COUNT(*) as count

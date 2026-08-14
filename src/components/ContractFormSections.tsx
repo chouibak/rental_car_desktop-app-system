@@ -20,11 +20,54 @@ function DamagePhotoPreview({ path }: { path: string }) {
   return <img className="damage-preview" src={url} alt="" />
 }
 
+function DamageVideoPreview({ path, t }: { path: string; t: Dict }) {
+  const [url, setUrl] = useState('')
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    setFailed(false)
+    window.api.getCarFileUrl(path).then((resolved) => {
+      if (active) setUrl(resolved || '')
+    })
+    return () => {
+      active = false
+    }
+  }, [path])
+
+  const openVideo = async () => {
+    try {
+      await window.api.openCarFile(path)
+    } catch {
+      alert(t.cannotOpenDocument)
+    }
+  }
+
+  return (
+    <div className="damage-item-video">
+      {url && !failed ? (
+        <video
+          className="damage-video-preview"
+          src={url}
+          controls
+          preload="metadata"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <button type="button" className="btn sm secondary" onClick={openVideo}>
+          {t.openVideo}
+        </button>
+      )}
+    </div>
+  )
+}
+
 type ContractDamageRepeaterProps = {
   damages: ContractDamage[]
   kind: 'departure' | 'return'
   onChange: (damages: ContractDamage[]) => void
   t: Dict
+  compact?: boolean
 }
 
 export function ContractDamageRepeater({ damages, kind, onChange, t }: ContractDamageRepeaterProps) {
@@ -49,57 +92,80 @@ export function ContractDamageRepeater({ damages, kind, onChange, t }: ContractD
     }
   }
 
+  const pickVideo = async (index: number) => {
+    try {
+      const result = await window.api.pickContractDamageVideo(kind)
+      if (result) update(index, { video: result.path })
+    } catch (err) {
+      const msg = String(err)
+      if (msg.includes('NOT_A_VIDEO')) alert(t.notAVideo)
+    }
+  }
+
   return (
     <div className="damage-repeater">
-      <div className="damage-add-wrap">
-        <button type="button" className="btn secondary damage-add-btn" onClick={addRow}>
-          {t.addDamageBtn}
-        </button>
-      </div>
+      <span className="vehicle-state-damages-label">{t.observedDamages}</span>
 
       {damages.map((damage, index) => (
-        <div className="damage-row panel panel-body" key={`${kind}-${index}`}>
-          <div className="field">
-            <label>{t.damagePart}</label>
-            <select className="select" value={damage.part} onChange={(e) => update(index, { part: e.target.value })}>
-              {DAMAGE_PARTS.map((part) => (
-                <option key={part} value={part}>
-                  {t[`part_${part}` as keyof Dict] || part}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>{t.damageType}</label>
-            <select className="select" value={damage.type} onChange={(e) => update(index, { type: e.target.value })}>
-              {DAMAGE_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {t[`damage_${type}` as keyof Dict] || type}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>{t.damageNote}</label>
-            <input className="input" value={damage.note} onChange={(e) => update(index, { note: e.target.value })} />
-          </div>
-          <div className="field damage-photo-field">
-            <label>{t.photo}</label>
-            <div className="damage-photo-actions">
-              <button type="button" className="btn secondary btn-sm" onClick={() => pickPhoto(index)}>
-                {t.addPhoto}
-              </button>
-              {damage.photo && <span className="muted-text">{t.photoAdded}</span>}
+        <div className="damage-item" key={`${kind}-${index}`}>
+          <div className="damage-item-top">
+            <div className="field">
+              <label>{t.damagePart}</label>
+              <select className="select" value={damage.part} onChange={(e) => update(index, { part: e.target.value })}>
+                {DAMAGE_PARTS.map((part) => (
+                  <option key={part} value={part}>
+                    {t[`part_${part}` as keyof Dict] || part}
+                  </option>
+                ))}
+              </select>
             </div>
-            {damage.photo && <DamagePhotoPreview path={damage.photo} />}
-          </div>
-          <div className="field damage-remove-field">
-            <button type="button" className="btn danger btn-sm" onClick={() => removeRow(index)}>
+            <div className="field">
+              <label>{t.damageType}</label>
+              <select className="select" value={damage.type} onChange={(e) => update(index, { type: e.target.value })}>
+                {DAMAGE_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {t[`damage_${type}` as keyof Dict] || type}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button type="button" className="btn danger sm" onClick={() => removeRow(index)}>
               {t.delete}
             </button>
           </div>
+
+          <div className="field">
+            <label>{t.damageNote}</label>
+            <input
+              className="input"
+              value={damage.note}
+              onChange={(e) => update(index, { note: e.target.value })}
+            />
+          </div>
+
+          <div className="damage-item-media">
+            <button type="button" className="btn secondary sm" onClick={() => pickPhoto(index)}>
+              {t.addPhoto}
+            </button>
+            {damage.photo ? <DamagePhotoPreview path={damage.photo} /> : null}
+            <button type="button" className="btn secondary sm" onClick={() => pickVideo(index)}>
+              {t.addVideo}
+            </button>
+            {damage.video ? (
+              <>
+                <DamageVideoPreview path={damage.video} t={t} />
+                <button type="button" className="btn secondary sm" onClick={() => update(index, { video: '' })}>
+                  {t.removeVideo}
+                </button>
+              </>
+            ) : null}
+          </div>
         </div>
       ))}
+
+      <button type="button" className="btn secondary damage-add-btn" onClick={addRow}>
+        {t.addDamageBtn}
+      </button>
     </div>
   )
 }
@@ -109,10 +175,13 @@ type ContractVehicleStateSectionProps = {
   fuelLevel: string
   notes: string
   damages: ContractDamage[]
+  mileage?: number
+  onMileageChange?: (value: number) => void
   onFuelChange: (value: string) => void
   onNotesChange: (value: string) => void
   onDamagesChange: (damages: ContractDamage[]) => void
   t: Dict
+  compact?: boolean
 }
 
 export function ContractVehicleStateSection({
@@ -120,34 +189,63 @@ export function ContractVehicleStateSection({
   fuelLevel,
   notes,
   damages,
+  mileage,
+  onMileageChange,
   onFuelChange,
   onNotesChange,
   onDamagesChange,
   t,
+  compact = false,
 }: ContractVehicleStateSectionProps) {
   return (
-    <div className="vehicle-state-body">
+    <div className={`vehicle-state-body${compact ? ' is-compact' : ''}`}>
       <div className="vehicle-state-top">
+        {onMileageChange ? (
+          <div className="field">
+            <label>{kind === 'return' ? t.returnMileage : t.departureMileage}</label>
+            <div className="input-suffix-wrap">
+              <input
+                className="input input-with-suffix"
+                type="number"
+                min={0}
+                value={mileage ?? ''}
+                onChange={(e) => onMileageChange(Number(e.target.value))}
+              />
+              <span className="input-suffix">km</span>
+            </div>
+          </div>
+        ) : null}
         <div className="field">
           <label>{t.fuelLevel}</label>
           <select className="select" value={fuelLevel} onChange={(e) => onFuelChange(e.target.value)}>
             <option value="">{t.selectOption}</option>
             {FUEL_LEVELS.map((level) => (
               <option key={level} value={level}>
-                {FUEL_FRACTION[level]} — {t[`fuel_${level}` as keyof Dict] || level}
+                {FUEL_FRACTION[level]}
               </option>
             ))}
           </select>
         </div>
         <div className="field vehicle-state-remarks">
           <label>{t.remarks}</label>
-          <textarea className="textarea" rows={4} value={notes} onChange={(e) => onNotesChange(e.target.value)} />
+          <textarea
+            className="textarea"
+            rows={compact ? 2 : 4}
+            placeholder={compact ? undefined : t.handoverRemarksHint}
+            value={notes}
+            onChange={(e) => onNotesChange(e.target.value)}
+          />
         </div>
       </div>
 
       <div className="vehicle-state-damages">
-        <label className="vehicle-state-damages-label">{t.observedDamages}</label>
-        <ContractDamageRepeater kind={kind} damages={damages} onChange={onDamagesChange} t={t} />
+        <ContractDamageRepeater
+          kind={kind}
+          damages={damages}
+          onChange={onDamagesChange}
+          t={t}
+          compact={compact}
+        />
       </div>
     </div>
   )

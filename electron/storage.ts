@@ -10,9 +10,17 @@ export const IMAGE_EXTENSIONS = [
   'tif', 'tiff', 'heic', 'heif', 'avif', 'jfif', 'pjpeg', 'pjp',
 ]
 
+export const VIDEO_EXTENSIONS = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'wmv', '3gp']
+
+export function isVideoExtension(filePath: string) {
+  const ext = path.extname(filePath).slice(1).toLowerCase()
+  return VIDEO_EXTENSIONS.includes(ext)
+}
+
 export function isImageExtension(filePath: string) {
   const ext = path.extname(filePath).slice(1).toLowerCase()
   if (!ext) return true
+  if (isVideoExtension(filePath)) return false
   const blocked = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'zip', 'rar']
   if (blocked.includes(ext)) return false
   if (IMAGE_EXTENSIONS.includes(ext)) return true
@@ -150,6 +158,88 @@ export function readFileAsDataUrl(filePath: string) {
 
 export function getPreviewUrl(filePath: string) {
   if (!filePath) return ''
+  if (isVideoExtension(filePath)) return toAppFileUrl(filePath)
   if (isImageExtension(filePath)) return readFileAsDataUrl(filePath)
   return toAppFileUrl(filePath)
+}
+
+const VIDEO_MIME: Record<string, string> = {
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  avi: 'video/x-msvideo',
+  mkv: 'video/x-matroska',
+  m4v: 'video/mp4',
+  wmv: 'video/x-msvideo',
+  '3gp': 'video/3gpp',
+}
+
+export function getMediaMime(filePath: string) {
+  const ext = path.extname(filePath).slice(1).toLowerCase()
+  return VIDEO_MIME[ext] || IMAGE_MIME[ext] || 'application/octet-stream'
+}
+
+/** Resolve app-file:// URL to a local filesystem path. */
+export function resolveAppFilePath(url: string) {
+  const raw = url.replace(/^app-file:/i, '')
+  const fileUrl = raw.startsWith('//') ? `file:${raw}` : raw.startsWith('file:') ? raw : `file://${raw}`
+  const parsed = new URL(fileUrl)
+  let filePath = decodeURIComponent(parsed.pathname)
+  if (process.platform === 'win32' && filePath.startsWith('/')) {
+    filePath = filePath.slice(1)
+  }
+  return path.normalize(filePath)
+}
+
+/** Serve local files for the app-file protocol (images + videos with Range support). */
+export function serveAppFileRequest(request: Request): Response {
+  const filePath = resolveAppFilePath(request.url)
+  if (!filePath || !fs.existsSync(filePath)) {
+    return new Response('Not Found', { status: 404 })
+  }
+
+  const stat = fs.statSync(filePath)
+  const mime = getMediaMime(filePath)
+  const range = request.headers.get('Range')
+
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range)
+    if (match) {
+      const start = match[1] ? parseInt(match[1], 10) : 0
+      const end = match[2] ? parseInt(match[2], 10) : stat.size - 1
+      if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= stat.size) {
+        return new Response(null, {
+          status: 416,
+          headers: { 'Content-Range': `bytes */${stat.size}` },
+        })
+      }
+      const safeEnd = Math.min(end, stat.size - 1)
+      const length = safeEnd - start + 1
+      const chunk = Buffer.alloc(length)
+      const fd = fs.openSync(filePath, 'r')
+      try {
+        fs.readSync(fd, chunk, 0, length, start)
+      } finally {
+        fs.closeSync(fd)
+      }
+      return new Response(chunk, {
+        status: 206,
+        headers: {
+          'Content-Type': mime,
+          'Content-Range': `bytes ${start}-${safeEnd}/${stat.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': String(length),
+        },
+      })
+    }
+  }
+
+  const buffer = fs.readFileSync(filePath)
+  return new Response(buffer, {
+    headers: {
+      'Content-Type': mime,
+      'Content-Length': String(stat.size),
+      'Accept-Ranges': 'bytes',
+    },
+  })
 }

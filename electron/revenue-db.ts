@@ -1,4 +1,12 @@
-import { UNPAID_RESERVATIONS_PAID_SUBQUERY } from './payment-sync'
+import {
+  datePrefixEquals,
+  localYmd,
+  localYearMonth,
+  roundMoney,
+  shiftYearMonth,
+  trailingYearMonths,
+} from './local-date'
+import { queryUnpaidTotal } from './payment-sync'
 
 type DbHelpers = {
   queryAll: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => T[]
@@ -32,155 +40,127 @@ export type RevenueStats = {
   by_payment_method: RevenueMethodPoint[]
 }
 
-function monthKeys(count: number) {
-  const keys: string[] = []
-  const cursor = new Date()
-  cursor.setDate(1)
-  cursor.setMonth(cursor.getMonth() - (count - 1))
-  for (let i = 0; i < count; i++) {
-    keys.push(cursor.toISOString().slice(0, 7))
-    cursor.setMonth(cursor.getMonth() + 1)
-  }
-  return keys
-}
-
-function previousMonthKey(monthKey: string) {
-  const [year, month] = monthKey.split('-').map(Number)
-  const date = new Date(year, month - 2, 1)
-  return date.toISOString().slice(0, 7)
-}
-
-function sumContractRevenue(helpers: DbHelpers, monthPrefix?: string) {
-  if (monthPrefix) {
-    return (
-      helpers.queryOne<{ s: number }>(
-        `SELECT COALESCE(SUM(amount), 0) as s FROM payments WHERE paid_at LIKE ?`,
-        [`${monthPrefix}%`],
-      )?.s ?? 0
-    )
-  }
-  return helpers.queryOne<{ s: number }>(`SELECT COALESCE(SUM(amount), 0) as s FROM payments`)?.s ?? 0
-}
-
-function sumReservationRevenue(helpers: DbHelpers, monthPrefix?: string, day?: string) {
-  const clauses = [`type = 'rental'`, `status = 'completed'`]
+function sumContractRevenue(helpers: DbHelpers, prefix?: string) {
+  const clauses = ['c.deleted_at IS NULL']
   const params: unknown[] = []
-  if (day) {
-    clauses.push('paid_at = ?')
-    params.push(day)
-  } else if (monthPrefix) {
-    clauses.push('paid_at LIKE ?')
-    params.push(`${monthPrefix}%`)
+  if (prefix) {
+    clauses.push(datePrefixEquals('p.paid_at', prefix))
+    params.push(prefix)
   }
-  return (
+  return roundMoney(
     helpers.queryOne<{ s: number }>(
-      `SELECT COALESCE(SUM(amount), 0) as s FROM reservation_payments WHERE ${clauses.join(' AND ')}`,
+      `SELECT COALESCE(SUM(p.amount), 0) as s
+       FROM payments p
+       INNER JOIN contracts c ON c.id = p.contract_id
+       WHERE ${clauses.join(' AND ')}`,
       params,
-    )?.s ?? 0
+    )?.s ?? 0,
   )
 }
 
-function totalRevenue(helpers: DbHelpers, monthPrefix?: string, day?: string) {
-  return sumContractRevenue(helpers, monthPrefix) + sumReservationRevenue(helpers, monthPrefix, day)
+function sumReservationRevenue(helpers: DbHelpers, prefix?: string) {
+  const clauses = [`p.type = 'rental'`, `p.status = 'completed'`, `r.status != 'cancelled'`]
+  const params: unknown[] = []
+  if (prefix) {
+    clauses.push(datePrefixEquals('p.paid_at', prefix))
+    params.push(prefix)
+  }
+  return roundMoney(
+    helpers.queryOne<{ s: number }>(
+      `SELECT COALESCE(SUM(p.amount), 0) as s
+       FROM reservation_payments p
+       INNER JOIN reservations r ON r.id = p.reservation_id
+       WHERE ${clauses.join(' AND ')}`,
+      params,
+    )?.s ?? 0,
+  )
 }
 
-function countPayments(helpers: DbHelpers, monthPrefix: string) {
+function totalRevenue(helpers: DbHelpers, prefix?: string) {
+  return roundMoney(sumContractRevenue(helpers, prefix) + sumReservationRevenue(helpers, prefix))
+}
+
+function countPayments(helpers: DbHelpers, prefix: string) {
   const contracts =
     helpers.queryOne<{ c: number }>(
-      `SELECT COUNT(*) as c FROM payments WHERE paid_at LIKE ?`,
-      [`${monthPrefix}%`],
+      `SELECT COUNT(*) as c
+       FROM payments p
+       INNER JOIN contracts c ON c.id = p.contract_id AND c.deleted_at IS NULL
+       WHERE ${datePrefixEquals('p.paid_at', prefix)}`,
+      [prefix],
     )?.c ?? 0
   const reservations =
     helpers.queryOne<{ c: number }>(
-      `SELECT COUNT(*) as c FROM reservation_payments
-       WHERE type = 'rental' AND status = 'completed' AND paid_at LIKE ?`,
-      [`${monthPrefix}%`],
+      `SELECT COUNT(*) as c
+       FROM reservation_payments p
+       INNER JOIN reservations r ON r.id = p.reservation_id AND r.status != 'cancelled'
+       WHERE p.type = 'rental' AND p.status = 'completed' AND ${datePrefixEquals('p.paid_at', prefix)}`,
+      [prefix],
     )?.c ?? 0
   return contracts + reservations
 }
 
-function sumExpenses(helpers: DbHelpers, monthPrefix?: string) {
-  if (monthPrefix) {
-    return (
+function sumExpenses(helpers: DbHelpers, prefix?: string) {
+  if (prefix) {
+    return roundMoney(
       helpers.queryOne<{ s: number }>(
-        `SELECT COALESCE(SUM(amount), 0) as s FROM expenses WHERE expense_date LIKE ?`,
-        [`${monthPrefix}%`],
-      )?.s ?? 0
+        `SELECT COALESCE(SUM(amount), 0) as s FROM expenses WHERE ${datePrefixEquals('expense_date', prefix)}`,
+        [prefix],
+      )?.s ?? 0,
     )
   }
-  return helpers.queryOne<{ s: number }>(`SELECT COALESCE(SUM(amount), 0) as s FROM expenses`)?.s ?? 0
+  return roundMoney(helpers.queryOne<{ s: number }>(`SELECT COALESCE(SUM(amount), 0) as s FROM expenses`)?.s ?? 0)
 }
 
-function unpaidTotal(helpers: DbHelpers) {
-  return (
-    helpers.queryOne<{ total: number }>(
-      `SELECT COALESCE(SUM(
-        CASE
-          WHEN r.total_amount > COALESCE(p.paid, 0) THEN r.total_amount - COALESCE(p.paid, 0)
-          ELSE 0
-        END
-      ), 0) as total
-       FROM reservations r
-       LEFT JOIN (${UNPAID_RESERVATIONS_PAID_SUBQUERY}) p ON p.reservation_id = r.id
-       WHERE r.status != 'cancelled'`,
-    )?.total ?? 0
-  )
+function growthPct(current: number, previous: number) {
+  if (previous === 0 && current === 0) return null
+  if (previous === 0) return 100
+  return Math.round(((current - previous) / previous) * 1000) / 10
 }
 
 export function createRevenueApi(helpers: DbHelpers) {
   return {
     getRevenueStats(): RevenueStats {
-      const today = new Date().toISOString().slice(0, 10)
-      const monthPrefix = today.slice(0, 7)
-      const lastMonthPrefix = previousMonthKey(monthPrefix)
+      const today = localYmd()
+      const monthPrefix = localYearMonth()
+      const lastMonthPrefix = shiftYearMonth(monthPrefix, -1)
       const yearPrefix = today.slice(0, 4)
 
-      const today_revenue = totalRevenue(helpers, undefined, today)
+      const today_revenue = totalRevenue(helpers, today)
       const month_revenue = totalRevenue(helpers, monthPrefix)
       const last_month_revenue = totalRevenue(helpers, lastMonthPrefix)
-      const year_revenue =
-        (helpers.queryOne<{ s: number }>(
-          `SELECT COALESCE(SUM(amount), 0) as s FROM payments WHERE paid_at LIKE ?`,
-          [`${yearPrefix}%`],
-        )?.s ?? 0) +
-        (helpers.queryOne<{ s: number }>(
-          `SELECT COALESCE(SUM(amount), 0) as s FROM reservation_payments
-           WHERE type = 'rental' AND status = 'completed' AND paid_at LIKE ?`,
-          [`${yearPrefix}%`],
-        )?.s ?? 0)
-
+      const year_revenue = totalRevenue(helpers, yearPrefix)
       const month_expenses = sumExpenses(helpers, monthPrefix)
-      const month_net = month_revenue - month_expenses
-      const month_growth_pct =
-        last_month_revenue > 0
-          ? Math.round(((month_revenue - last_month_revenue) / last_month_revenue) * 1000) / 10
-          : null
+      const month_net = roundMoney(month_revenue - month_expenses)
 
-      const monthly_trend = monthKeys(6).map((month) => {
+      const monthly_trend = trailingYearMonths(6).map((month) => {
         const revenue = totalRevenue(helpers, month)
         const expenses = sumExpenses(helpers, month)
-        return { month, revenue, expenses, net: revenue - expenses }
+        return { month, revenue, expenses, net: roundMoney(revenue - expenses) }
       })
 
       const contracts = sumContractRevenue(helpers, monthPrefix)
       const reservations = sumReservationRevenue(helpers, monthPrefix)
 
       const contractMethods = helpers.queryAll<{ method: string; amount: number }>(
-        `SELECT method, COALESCE(SUM(amount), 0) as amount
-         FROM payments WHERE paid_at LIKE ?
-         GROUP BY method`,
-        [`${monthPrefix}%`],
+        `SELECT COALESCE(NULLIF(TRIM(p.method), ''), 'cash') as method, COALESCE(SUM(p.amount), 0) as amount
+         FROM payments p
+         INNER JOIN contracts c ON c.id = p.contract_id AND c.deleted_at IS NULL
+         WHERE ${datePrefixEquals('p.paid_at', monthPrefix)}
+         GROUP BY COALESCE(NULLIF(TRIM(p.method), ''), 'cash')`,
+        [monthPrefix],
       )
       const reservationMethods = helpers.queryAll<{ method: string; amount: number }>(
-        `SELECT method, COALESCE(SUM(amount), 0) as amount
-         FROM reservation_payments
-         WHERE type = 'rental' AND status = 'completed' AND paid_at LIKE ?
-         GROUP BY method`,
-        [`${monthPrefix}%`],
+        `SELECT COALESCE(NULLIF(TRIM(p.method), ''), 'cash') as method, COALESCE(SUM(p.amount), 0) as amount
+         FROM reservation_payments p
+         INNER JOIN reservations r ON r.id = p.reservation_id AND r.status != 'cancelled'
+         WHERE p.type = 'rental' AND p.status = 'completed' AND ${datePrefixEquals('p.paid_at', monthPrefix)}
+         GROUP BY COALESCE(NULLIF(TRIM(p.method), ''), 'cash')`,
+        [monthPrefix],
       )
       const methodMap = new Map<string, number>()
       for (const row of [...contractMethods, ...reservationMethods]) {
-        methodMap.set(row.method, (methodMap.get(row.method) ?? 0) + row.amount)
+        methodMap.set(row.method, roundMoney((methodMap.get(row.method) ?? 0) + Number(row.amount)))
       }
       const by_payment_method = Array.from(methodMap.entries())
         .map(([method, amount]) => ({ method, amount }))
@@ -193,9 +173,9 @@ export function createRevenueApi(helpers: DbHelpers) {
         year_revenue,
         month_expenses,
         month_net,
-        unpaid_total: unpaidTotal(helpers),
+        unpaid_total: roundMoney(queryUnpaidTotal(helpers)),
         month_payments_count: countPayments(helpers, monthPrefix),
-        month_growth_pct,
+        month_growth_pct: growthPct(month_revenue, last_month_revenue),
         monthly_trend,
         revenue_by_source: { contracts, reservations },
         by_payment_method,

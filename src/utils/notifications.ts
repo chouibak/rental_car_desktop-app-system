@@ -1,5 +1,6 @@
 import type { Notification, NotificationKind } from '../types'
 import type { Lang } from '../types'
+import { VIDANGE_SOON_KM } from './vidange'
 
 type Dict = Record<string, string>
 
@@ -38,14 +39,30 @@ export function notificationTitle(t: Dict, kind: NotificationKind) {
     customer_doc_expiring: t.notificationTitleCustomerDocExpiring,
     chauffeur_doc_expired: t.notificationTitleChauffeurDocExpired,
     chauffeur_doc_expiring: t.notificationTitleChauffeurDocExpiring,
+    car_vidange_overdue: t.notificationTitleCarVidangeOverdue,
+    car_vidange_soon: t.notificationTitleCarVidangeSoon,
   }
   return titles[kind]
+}
+
+export function isVidangeNotification(kind: NotificationKind) {
+  return kind.startsWith('car_vidange_')
+}
+
+export function isDocNotification(kind: NotificationKind) {
+  return kind.includes('_doc_')
+}
+
+function vidangeKmLabel(t: Dict, km: number) {
+  const n = Math.abs(Math.round(km)).toLocaleString('fr-FR')
+  return km <= 0 ? t.vidangeKmOverdue.replace('{n}', n) : t.vidangeKmRemaining.replace('{n}', n)
 }
 
 export function notificationEntityTag(t: Dict, kind: NotificationKind) {
   if (kind.startsWith('contract_')) return t.notificationEntityContract
   if (kind.startsWith('reservation_')) return t.notificationEntityReservation
-  if (kind.startsWith('car_doc_')) return t.notificationEntityCar
+  if (isVidangeNotification(kind)) return t.notificationEntityVidange
+  if (kind.startsWith('car_')) return t.notificationEntityCar
   if (kind.startsWith('customer_doc_')) return t.notificationEntityCustomer
   return t.notificationEntityChauffeur
 }
@@ -53,6 +70,12 @@ export function notificationEntityTag(t: Dict, kind: NotificationKind) {
 export function notificationDetail(t: Dict, item: Notification) {
   if (item.doc_type) {
     return `${item.title_label} · ${docTypeLabel(t, item.doc_type)}`
+  }
+  if (isVidangeNotification(item.kind) && item.km_remaining != null) {
+    return `${item.title_label} · ${vidangeKmLabel(t, item.km_remaining)}`
+  }
+  if (isVidangeNotification(item.kind)) {
+    return item.title_label
   }
   return `${item.title_label} · ${item.subtitle}`
 }
@@ -75,12 +98,24 @@ export function notificationMessage(t: Dict, item: Notification) {
     customer_doc_expiring: t.notificationCustomerDocExpiring,
     chauffeur_doc_expired: t.notificationChauffeurDocExpired,
     chauffeur_doc_expiring: t.notificationChauffeurDocExpiring,
+    car_vidange_overdue: t.notificationCarVidangeOverdue,
+    car_vidange_soon: t.notificationCarVidangeSoon,
   }
 
-  return replaceParams(templates[item.kind], { ref, doc, days })
+  return replaceParams(templates[item.kind], { ref, doc, days, detail: item.subtitle })
 }
 
 export function notificationTimingLabel(t: Dict, item: Notification) {
+  if (isVidangeNotification(item.kind)) {
+    const km = item.km_remaining
+    const showKm =
+      km != null &&
+      (km <= 0 || (item.kind === 'car_vidange_soon' && km > 0 && km <= VIDANGE_SOON_KM))
+    if (showKm && km != null) return vidangeKmLabel(t, km)
+    if (item.days_until < 0) return replaceParams(t.notificationDaysOverdue, { days: Math.abs(item.days_until) })
+    if (item.days_until === 0) return t.notificationVidangeDueToday
+    return replaceParams(t.notificationDaysLeft, { days: item.days_until })
+  }
   if (item.kind.includes('_doc_')) {
     if (item.days_until < 0) return replaceParams(t.notificationDaysOverdue, { days: Math.abs(item.days_until) })
     if (item.days_until === 0) return t.notificationDocDueToday
@@ -105,7 +140,8 @@ export function isReturnNotification(kind: NotificationKind) {
 export function notificationActionLabel(t: Dict, kind: NotificationKind) {
   if (kind.startsWith('contract_')) return t.notificationActionContract
   if (kind.startsWith('reservation_')) return t.notificationActionReservation
-  if (kind.startsWith('car_doc_')) return t.notificationActionCar
+  if (isVidangeNotification(kind)) return t.notificationActionVidange
+  if (kind.startsWith('car_')) return t.notificationActionCar
   if (kind.startsWith('customer_doc_')) return t.notificationActionCustomer
   return t.notificationActionChauffeur
 }

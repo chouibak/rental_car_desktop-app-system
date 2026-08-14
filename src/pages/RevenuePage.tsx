@@ -77,7 +77,7 @@ export default function RevenuePage() {
         <StatCard
           label={t.paymentsCount}
           value={stats.month_payments_count}
-          hint={t.todayPaymentsHint.replace('{count}', String(stats.month_payments_count))}
+          hint={t.monthPaymentsHint.replace('{count}', String(stats.month_payments_count))}
         />
         <StatCard label={t.revenueYear} value={money(stats.year_revenue)} tone="info" />
       </div>

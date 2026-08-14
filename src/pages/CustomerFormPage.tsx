@@ -276,11 +276,11 @@ export default function CustomerFormPage() {
                     />
                   </div>
                   <div className="row-actions">
-                    <button type="button" className="btn secondary" onClick={() => onAddDocument(doc.key)}>
+                    <button type="button" className="btn secondary sm" onClick={() => onAddDocument(doc.key)}>
                       {path ? t.edit : t.addDocument}
                     </button>
                     {path && (
-                      <button type="button" className="btn danger" onClick={() => onRemoveDocument(doc.key)}>
+                      <button type="button" className="btn danger sm" onClick={() => onRemoveDocument(doc.key)}>
                         {t.delete}
                       </button>
                     )}
@@ -294,7 +294,7 @@ export default function CustomerFormPage() {
         {error && <div className="error">{error}</div>}
 
         <div className="form-actions">
-          <button type="button" className="btn secondary" onClick={() => navigate('/customers')}>
+          <button type="button" className="btn secondary" onClick={() => navigate(isEdit && customerId ? `/customers/${customerId}` : '/customers')}>
             {t.cancel}
           </button>
           <button className="btn" type="submit" disabled={saving}>

@@ -1,11 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { IconEdit, IconFile, IconTrash } from '../components/icons'
+import {
+  IconCalendar,
+  IconChevronLeft,
+  IconEdit,
+  IconFile,
+  IconTrash,
+  IconWallet,
+} from '../components/icons'
 import { ReservationPaymentsPanel } from '../components/ReservationPaymentsPanel'
 import { PageHeader, PaymentBadge, StatusBadge } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import type { Contract, Reservation } from '../types'
 import { deliveryLocationLabel } from '../utils/reservation'
+
+type ReservationTab = 'details' | 'contract' | 'payments'
 
 function formatDatetime(value: string) {
   const d = new Date(value)
@@ -25,6 +34,7 @@ export default function ReservationDetailPage() {
   const { t, money } = useLang()
   const [reservation, setReservation] = useState<Reservation | null>(null)
   const [linkedContracts, setLinkedContracts] = useState<Contract[]>([])
+  const [activeTab, setActiveTab] = useState<ReservationTab>('details')
 
   useEffect(() => {
     if (!id) return
@@ -114,113 +124,176 @@ export default function ReservationDetailPage() {
     { label: t.deliveryLocation, value: deliveryLocationLabel(reservation.delivery_location, t) },
   ]
 
+  const tabs: {
+    id: ReservationTab
+    label: string
+    icon: ReactNode
+    badge?: string | number
+    badgeTone?: 'muted' | 'ok' | 'warn' | 'danger'
+  }[] = [
+    {
+      id: 'details',
+      label: t.details,
+      icon: <IconCalendar size={15} />,
+    },
+    {
+      id: 'contract',
+      label: t.contracts,
+      icon: <IconFile size={15} />,
+      badge: linkedContracts.length,
+      badgeTone: linkedContracts.length > 0 ? 'ok' : 'muted',
+    },
+    {
+      id: 'payments',
+      label: t.payments,
+      icon: <IconWallet size={15} />,
+      badgeTone: paymentStatus === 'paid' ? 'ok' : paymentStatus === 'partial' ? 'warn' : 'danger',
+      badge: paymentStatus === 'paid' ? t.paid : paymentStatus === 'partial' ? t.partial : t.unpaid,
+    },
+  ]
+
   return (
-    <div>
+    <div className="reservation-detail-page">
       <PageHeader
         title={reservation.reference}
         subtitle={[reservation.customer_name, reservation.car_plate].filter(Boolean).join(' · ') || undefined}
       >
-        <Link className="btn secondary sm" to="/reservations">
-          {t.back}
-        </Link>
-        <Link className="btn sm" to={`/reservations/${reservation.id}/edit`}>
-          <IconEdit size={15} />
-          {t.edit}
-        </Link>
-        <button className="btn danger sm" onClick={onDelete}>
-          <IconTrash size={15} />
-          {t.delete}
-        </button>
+        <div className="toolbar-nav">
+          <Link className="btn btn-back" to="/reservations">
+            <IconChevronLeft size={16} />
+            {t.back}
+          </Link>
+        </div>
+
+        <div className="toolbar-manage">
+          <Link className="btn btn-edit" to={`/reservations/${reservation.id}/edit`}>
+            <IconEdit size={16} />
+            {t.edit}
+          </Link>
+          <button type="button" className="btn danger" onClick={onDelete}>
+            <IconTrash size={15} />
+            {t.delete}
+          </button>
+        </div>
       </PageHeader>
 
-      <div className="panel contract-action-panel">
-        <div className="panel-header">
-          <div className="panel-header-title">
-            <IconFile size={18} />
-            <h3>{t.contractForReservation}</h3>
-          </div>
-        </div>
-        <div className="panel-body contract-action-body">
-          {linkedContracts.length > 0 ? (
-            <div className="contract-action-existing">
-              {linkedContracts.length > 1 ? (
-                <p className="contract-duplicate-reservation">{t.duplicateReservationWarning}</p>
-              ) : null}
-              <div className="linked-contracts-list">
-                {linkedContracts.map((contract) => (
-                  <div className="linked-contract-row" key={contract.id}>
-                    <div>
-                      <strong>{contract.contract_number}</strong>
-                      <p className="muted-text">
-                        {contract.client_name} · {money(contract.total_amount)}
-                        {' · '}
-                        <StatusBadge status={contract.status === 'completed' ? 'closed' : contract.status} />
-                      </p>
-                    </div>
-                    <div className="contract-action-buttons">
-                      <Link className="btn" to={`/contracts/${contract.id}`}>
-                        {t.viewContract}
-                      </Link>
-                      <Link className="btn secondary" to={`/contracts/${contract.id}/edit`}>
-                        {t.editContractAction}
-                      </Link>
-                    </div>
+      <div className="car-detail-meta">
+        <StatusBadge status={reservation.status} />
+        <PaymentBadge status={paymentStatus} />
+        <span className="muted-text">
+          {money(paid)} / {money(reservation.total_amount)}
+        </span>
+      </div>
+
+      <nav className="car-detail-tabs" aria-label={t.details}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={`car-detail-tab ${activeTab === tab.id ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            <span className="car-detail-tab-icon" aria-hidden>
+              {tab.icon}
+            </span>
+            <span className="car-detail-tab-label">{tab.label}</span>
+            {tab.badge != null && tab.badge !== '' ? (
+              <span className={`car-detail-tab-badge car-detail-tab-badge--${tab.badgeTone || 'muted'}`}>
+                {tab.badge}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </nav>
+
+      <div className="car-detail-tab-panels">
+        {activeTab === 'details' && (
+          <div className="panel car-detail-panel">
+            <div className="panel-header">
+              <h3>{t.details}</h3>
+            </div>
+            <div className="panel-body">
+              <div className="info-grid">
+                {infoItems.map((item) => (
+                  <div className="info-item" key={item.label}>
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
                   </div>
                 ))}
               </div>
+
+              {reservation.message?.trim() ? (
+                <div className="detail-notes">
+                  <h4>{t.message}</h4>
+                  <p>{reservation.message}</p>
+                </div>
+              ) : null}
             </div>
-          ) : reservation.status === 'cancelled' ? (
-            <p className="muted-text">{t.contractCancelledHint}</p>
-          ) : (
-            <div className="contract-action-create">
+          </div>
+        )}
+
+        {activeTab === 'contract' && (
+          <div className="panel car-detail-panel">
+            <div className="panel-header">
               <div>
-                <strong>{t.noContractYet}</strong>
-                <p className="muted-text">{t.contractForReservationHint}</p>
+                <h3>{t.contractForReservation}</h3>
+                <p className="panel-subtitle">{t.contractForReservationHint}</p>
               </div>
-              <button className="btn" onClick={onCreateContract}>
-                {t.createContractFromReservation}
-              </button>
             </div>
-          )}
-        </div>
-      </div>
-
-      <div className="panel">
-        <div className="panel-header">
-          <h3>{t.details}</h3>
-          <div className="row-actions">
-            <StatusBadge status={reservation.status} />
-            <PaymentBadge status={paymentStatus} />
+            <div className="panel-body contract-action-body">
+              {linkedContracts.length > 0 ? (
+                <div className="contract-action-existing">
+                  {linkedContracts.length > 1 ? (
+                    <p className="contract-duplicate-reservation">{t.duplicateReservationWarning}</p>
+                  ) : null}
+                  <div className="linked-contracts-list">
+                    {linkedContracts.map((contract) => (
+                      <div className="linked-contract-row" key={contract.id}>
+                        <div>
+                          <strong>{contract.contract_number}</strong>
+                          <p className="muted-text">
+                            {contract.client_name} · {money(contract.total_amount)}
+                            {' · '}
+                            <StatusBadge status={contract.status === 'completed' ? 'closed' : contract.status} />
+                          </p>
+                        </div>
+                        <div className="contract-action-buttons">
+                          <Link className="btn sm" to={`/contracts/${contract.id}`}>
+                            {t.viewContract}
+                          </Link>
+                          <Link className="btn secondary sm" to={`/contracts/${contract.id}/edit`}>
+                            {t.editContractAction}
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : reservation.status === 'cancelled' ? (
+                <p className="muted-text">{t.contractCancelledHint}</p>
+              ) : (
+                <div className="contract-action-create">
+                  <div>
+                    <strong>{t.noContractYet}</strong>
+                    <p className="muted-text">{t.contractForReservationHint}</p>
+                  </div>
+                  <button type="button" className="btn" onClick={onCreateContract}>
+                    {t.createContractFromReservation}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-        <div className="panel-body">
-          <div className="info-grid">
-            {infoItems.map((item) => (
-              <div className="info-item" key={item.label}>
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
 
-        {reservation.message?.trim() && (
-          <>
-            <div className="panel-header panel-header-divider">
-              <h3>{t.message}</h3>
-            </div>
-            <div className="panel-body detail-notes">
-              <p>{reservation.message}</p>
-            </div>
-          </>
+        {activeTab === 'payments' && (
+          <ReservationPaymentsPanel
+            reservationId={reservation.id}
+            reservation={reservation}
+            onReservationChange={setReservation}
+          />
         )}
       </div>
-
-      <ReservationPaymentsPanel
-        reservationId={reservation.id}
-        reservation={reservation}
-        onReservationChange={setReservation}
-      />
     </div>
   )
 }

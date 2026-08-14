@@ -1,3 +1,5 @@
+import { computeVidangeStatus } from './vidange-db'
+
 type DbHelpers = {
   queryAll: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => T[]
   queryOne: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => T | null
@@ -18,6 +20,8 @@ export type NotificationKind =
   | 'customer_doc_expiring'
   | 'chauffeur_doc_expired'
   | 'chauffeur_doc_expiring'
+  | 'car_vidange_overdue'
+  | 'car_vidange_soon'
 
 export type Notification = {
   id: string
@@ -30,6 +34,7 @@ export type Notification = {
   subtitle: string
   doc_type?: string
   entity_id: number
+  km_remaining?: number | null
 }
 
 export type NotificationCounts = {
@@ -41,7 +46,6 @@ export type NotificationCounts = {
 }
 
 const CAR_DOC_FIELDS = [
-  { field: 'doc_carte_grise_expiry', type: 'carte_grise' },
   { field: 'doc_assurance_expiry', type: 'assurance' },
   { field: 'doc_controle_technique_expiry', type: 'controle_technique' },
   { field: 'doc_vignette_expiry', type: 'vignette' },
@@ -275,6 +279,64 @@ export function createNotificationsApi(helpers: DbHelpers, getSettings: () => Re
     return items
   }
 
+  function buildCarVidangeNotifications(): Notification[] {
+    const cars = queryAll<{
+      id: number
+      brand: string
+      model: string
+      plate_number: string
+      mileage: number
+      vidange_interval_km: number
+      vidange_interval_months: number
+      vidange_last_date: string
+      vidange_last_mileage: number
+    }>(
+      `SELECT id, brand, model, plate_number, mileage,
+              vidange_interval_km, vidange_interval_months, vidange_last_date, vidange_last_mileage
+       FROM cars`,
+    )
+
+    const items: Notification[] = []
+    for (const car of cars) {
+      const status = computeVidangeStatus(car)
+      if (!status.enabled || status.never_done || (!status.overdue && !status.due_soon)) continue
+
+      const label = carLabel({
+        brand: car.brand,
+        model: car.model,
+        plate_number: car.plate_number,
+      })
+
+      const daysUntil =
+        status.days_remaining != null && !Number.isNaN(status.days_remaining)
+          ? status.days_remaining
+          : status.overdue
+            ? -1
+            : 1
+
+      items.push({
+        id: `car-vidange-${car.id}`,
+        kind: status.overdue ? 'car_vidange_overdue' : 'car_vidange_soon',
+        severity:
+          status.severity === 'critical'
+            ? 'critical'
+            : status.severity === 'high'
+              ? 'high'
+              : status.severity === 'medium'
+                ? 'medium'
+                : 'low',
+        link: `/cars/${car.id}?tab=vidange`,
+        due_date: status.next_due_date || '',
+        days_until: daysUntil,
+        title_label: label,
+        subtitle: 'vidange',
+        entity_id: car.id,
+        km_remaining: status.km_remaining,
+      })
+    }
+    return items
+  }
+
   function buildCustomerDocNotifications(docSoonDays: number): Notification[] {
     const customers = queryAll<Record<string, string | number>>(
       `SELECT id, name, cin_expiry_date, passport_expiry_date, license_expiry_date FROM customers`,
@@ -337,6 +399,7 @@ export function createNotificationsApi(helpers: DbHelpers, getSettings: () => Re
         ...buildContractReturnNotifications(returnSoonDays),
         ...buildReservationReturnNotifications(returnSoonDays),
         ...buildCarDocNotifications(docSoonDays),
+        ...buildCarVidangeNotifications(),
         ...buildCustomerDocNotifications(docSoonDays),
         ...buildChauffeurDocNotifications(docSoonDays),
       ]

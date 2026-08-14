@@ -5,6 +5,8 @@ import { IconChevronRight, IconDownload, IconEdit, IconPlus, IconSearch, IconTra
 import { CarStatusBadge, EmptyState, PageHeader, StatCard } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { monthBoundaryIsoRange, startOfMonth } from '../utils/calendar'
+import { formatContractDatetime } from '../utils/contracts'
+import { computeVidangeStatus, getVidangeTrafficLevel } from '../utils/vidange'
 import type { Car, CarComputedStatus, CarStats, Reservation } from '../types'
 
 const CATEGORIES = ['economique', 'compacte', 'suv', '4x4', 'monospace'] as const
@@ -205,9 +207,37 @@ export default function CarsPage() {
                       <CarStatusBadge status={car.computed_status ?? 'disponible'} />
                       {car.computed_status === 'louee' && car.return_date && (
                         <div className="muted-text">
-                          {t.returnOn} {car.return_date}
+                          {t.returnOn} {formatContractDatetime(car.return_date)}
                         </div>
                       )}
+                      {(() => {
+                        const vidange = computeVidangeStatus(car)
+                        if (!vidange.enabled) return null
+                        const level = getVidangeTrafficLevel(vidange)
+                        const label =
+                          level === 'never'
+                            ? t.vidangeNeverDone
+                            : level === 'due'
+                              ? t.vidangeStatusDue
+                              : level === 'soon'
+                                ? t.vidangeStatusSoon
+                                : t.vidangeStatusOk
+                        let remaining = ''
+                        if (!vidange.never_done && vidange.km_remaining != null) {
+                          const n = Math.abs(Math.round(vidange.km_remaining)).toLocaleString('fr-FR')
+                          remaining =
+                            vidange.km_remaining <= 0
+                              ? t.vidangeKmOverdue.replace('{n}', n)
+                              : t.vidangeKmRemaining.replace('{n}', n)
+                        }
+                        return (
+                          <div className={`muted-text vidange-list-status vidange-list-status--${level}`}>
+                            <span className="vidange-list-dot" aria-hidden />
+                            {t.vidange}: {label}
+                            {remaining ? ` · ${remaining}` : ''}
+                          </div>
+                        )
+                      })()}
                     </td>
                     <td>
                       <strong>{money(car.price_per_day)}</strong>

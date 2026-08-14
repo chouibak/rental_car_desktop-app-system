@@ -145,10 +145,12 @@ export default function App() {
         </nav>
 
         <div className="sidebar-footer">
-          <p className="sidebar-user muted-text">{t.authLoggedInAs.replace('{user}', username)}</p>
-          <button type="button" className="btn ghost sidebar-logout" onClick={() => logout()}>
-            {t.authLogout}
-          </button>
+          <div className="sidebar-session">
+            <p className="sidebar-user">{t.authLoggedInAs.replace('{user}', username)}</p>
+            <button type="button" className="sidebar-logout" onClick={() => logout()}>
+              {t.authLogout}
+            </button>
+          </div>
           <div className="lang-switch">
             <button type="button" className={lang === 'fr' ? 'active' : ''} onClick={() => setLang('fr')}>
               FR

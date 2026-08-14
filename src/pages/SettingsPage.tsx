@@ -21,6 +21,8 @@ type SettingsForm = {
 
   company_logo: string
 
+  contract_conditions_image: string
+
   company_phone: string
 
   company_whatsapp: string
@@ -71,6 +73,8 @@ const EMPTY_FORM: SettingsForm = {
 
   company_logo: '',
 
+  contract_conditions_image: '',
+
   company_phone: '',
 
   company_whatsapp: '',
@@ -115,6 +119,10 @@ const EMPTY_FORM: SettingsForm = {
 
 
 
+function isPdfFile(filePath: string) {
+  return /\.pdf$/i.test(filePath || '')
+}
+
 function SettingsSection({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
 
   return (
@@ -146,6 +154,7 @@ export default function SettingsPage() {
 
   const [form, setForm] = useState<SettingsForm>(EMPTY_FORM)
   const [logoPreview, setLogoPreview] = useState('')
+  const [conditionsPreview, setConditionsPreview] = useState('')
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
 
@@ -168,6 +177,7 @@ export default function SettingsPage() {
       setForm({
         company_name: s.company_name || '',
         company_logo: s.company_logo || '',
+        contract_conditions_image: s.contract_conditions_image || '',
         company_phone: s.company_phone || '',
         company_whatsapp: s.company_whatsapp || '',
         company_email: s.company_email || '',
@@ -195,6 +205,13 @@ export default function SettingsPage() {
         setLogoPreview(url)
       } else {
         setLogoPreview('')
+      }
+
+      if (s.contract_conditions_image) {
+        const url = await window.api.getContractConditionsUrl(s.contract_conditions_image)
+        setConditionsPreview(url)
+      } else {
+        setConditionsPreview('')
       }
     })
   }, [])
@@ -248,6 +265,50 @@ export default function SettingsPage() {
     update('company_logo', '')
 
     setLogoPreview('')
+
+  }
+
+
+
+  const onPickConditions = async () => {
+
+    try {
+
+      const picked = await window.api.pickContractConditionsImage()
+
+      if (!picked) return
+
+      if (form.contract_conditions_image && form.contract_conditions_image !== picked.path) {
+
+        await window.api.removeContractConditionsImage(form.contract_conditions_image)
+
+      }
+
+      update('contract_conditions_image', picked.path)
+
+      setConditionsPreview(picked.url)
+
+    } catch (err) {
+
+      setError(String(err).includes('INVALID_CONDITIONS_FILE') ? t.contractConditionsInvalid : t.requiredField)
+
+    }
+
+  }
+
+
+
+  const onRemoveConditions = async () => {
+
+    if (form.contract_conditions_image) {
+
+      await window.api.removeContractConditionsImage(form.contract_conditions_image)
+
+    }
+
+    update('contract_conditions_image', '')
+
+    setConditionsPreview('')
 
   }
 
@@ -404,6 +465,56 @@ export default function SettingsPage() {
             <label>{t.companyName}</label>
 
             <input className="input" value={form.company_name} onChange={(e) => update('company_name', e.target.value)} />
+
+          </div>
+
+        </SettingsSection>
+
+
+
+        <SettingsSection title={t.contractConditions} hint={t.contractConditionsHint}>
+
+          <div className="field full">
+
+            <label>{t.contractConditionsImage}</label>
+
+            <div className="settings-logo-row">
+
+              <div className="settings-conditions-preview">
+
+                {isPdfFile(form.contract_conditions_image) ? (
+                  <span className="settings-conditions-pdf">{t.contractConditionsPdf}</span>
+                ) : conditionsPreview ? (
+                  <img src={conditionsPreview} alt={t.contractConditionsImage} />
+                ) : (
+                  <span>{t.contractConditionsEmpty}</span>
+                )}
+
+              </div>
+
+              <div className="settings-logo-actions">
+
+                <button type="button" className="btn secondary" onClick={onPickConditions}>
+
+                  {t.chooseConditionsImage}
+
+                </button>
+
+                {form.contract_conditions_image ? (
+
+                  <button type="button" className="btn ghost" onClick={onRemoveConditions}>
+
+                    {t.removeConditionsImage}
+
+                  </button>
+
+                ) : null}
+
+              </div>
+
+            </div>
+
+            <span className="field-hint">{t.contractConditionsTypes}</span>
 
           </div>
 

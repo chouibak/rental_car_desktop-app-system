@@ -2,8 +2,8 @@ import { dialog, shell, type BrowserWindow } from 'electron'
 import fs from 'node:fs'
 import { getDbApi } from './db'
 import { buildContractPdf } from './contract-pdf'
-import { copyDamagePhoto, pdfPathForContract } from './contract-storage'
-import { IMAGE_EXTENSIONS, isImageExtension, readFileAsDataUrl } from './storage'
+import { copyDamagePhoto, copyDamageVideo, pdfPathForContract } from './contract-storage'
+import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, isImageExtension, isVideoExtension, readFileAsDataUrl, toAppFileUrl } from './storage'
 
 const IMAGE_FILTERS = [
   { name: 'Images', extensions: IMAGE_EXTENSIONS },
@@ -31,17 +31,37 @@ export async function pickContractDamagePhoto(
   return { path: storedPath, url: readFileAsDataUrl(storedPath) }
 }
 
+export async function pickContractDamageVideo(win: BrowserWindow | null, kind: 'departure' | 'return' = 'departure') {
+  const options = {
+    title: 'Lier une vidéo de dommage',
+    properties: ['openFile'] as ('openFile')[],
+    filters: [
+      { name: 'Vidéos', extensions: VIDEO_EXTENSIONS },
+      { name: 'All files', extensions: ['*'] as string[] },
+    ],
+  }
+  const { canceled, filePaths } = win
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options)
+
+  if (canceled || !filePaths[0]) return null
+  if (!isVideoExtension(filePaths[0])) throw new Error('NOT_A_VIDEO')
+  if (!fs.existsSync(filePaths[0])) throw new Error('FILE_NOT_FOUND')
+
+  const storedPath = copyDamageVideo(filePaths[0], kind)
+  return { path: storedPath, url: toAppFileUrl(storedPath) }
+}
+
 export async function ensureContractPdf(contractId: number) {
   const api = getDbApi()
   const contract = api.getContract(contractId)
   if (!contract) throw new Error('CONTRACT_NOT_FOUND')
 
   const outputPath = pdfPathForContract(contract.contract_number)
-  if (!fs.existsSync(outputPath)) {
-    const settings = api.getSettings()
-    const breakdown = api.getContractInvoiceBreakdown(contractId)
-    await buildContractPdf(outputPath, contract, settings, breakdown)
-  }
+  const settings = api.getSettings()
+  const breakdown = api.getContractInvoiceBreakdown(contractId)
+  // Always rebuild so paid amount / unpaid balance / PDF options stay current
+  await buildContractPdf(outputPath, contract, settings, breakdown)
 
   return outputPath
 }
@@ -53,13 +73,7 @@ export async function generateContractPdf(contractId: number) {
 }
 
 export async function openContractPdf(contractId: number) {
-  const api = getDbApi()
-  const contract = api.getContract(contractId)
-  if (!contract) throw new Error('CONTRACT_NOT_FOUND')
-  const pdfPath = pdfPathForContract(contract.contract_number)
-  if (!fs.existsSync(pdfPath)) {
-    return generateContractPdf(contractId)
-  }
-  await shell.openPath(pdfPath)
-  return { ok: true, path: pdfPath }
+  const outputPath = await ensureContractPdf(contractId)
+  await shell.openPath(outputPath)
+  return { ok: true, path: outputPath }
 }

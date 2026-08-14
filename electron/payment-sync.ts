@@ -1,8 +1,11 @@
 import type { PaymentStatus, DepositStatus } from './reservations-db'
 
-type DbHelpers = {
+type QueryHelpers = {
   queryAll: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => T[]
   queryOne: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => T | null
+}
+
+type DbHelpers = QueryHelpers & {
   run: (sql: string, params?: unknown[]) => void
   now: () => string
 }
@@ -50,11 +53,19 @@ export function syncReservationPaymentStatus(helpers: DbHelpers, reservationId: 
 
   if (!reservation) return
 
+  const contractTotal =
+    helpers.queryOne<{ s: number }>(
+      `SELECT COALESCE(MAX(total_amount), 0) as s FROM contracts
+       WHERE reservation_id = ? AND deleted_at IS NULL AND status != 'cancelled'`,
+      [reservationId],
+    )?.s ?? 0
+
+  const targetTotal = Math.max(Number(reservation.total_amount ?? 0), Number(contractTotal ?? 0))
   const rentalPaid = getReservationRentalPaid(helpers, reservationId)
 
   let payment_status: PaymentStatus = 'unpaid'
   if (rentalPaid <= 0) payment_status = 'unpaid'
-  else if (rentalPaid >= reservation.total_amount) payment_status = 'paid'
+  else if (targetTotal > 0 && rentalPaid >= targetTotal) payment_status = 'paid'
   else payment_status = 'partial'
 
   const depositPaid =
@@ -113,3 +124,45 @@ export const UNPAID_RESERVATIONS_PAID_SUBQUERY = `
   ) combined
   GROUP BY reservation_id
 `
+
+/** Same formula as contracts-db PAID_AMOUNT_EXPR: contract payments + linked reservation rentals. */
+export const CONTRACT_PAID_AMOUNT_EXPR = `
+  (
+    (SELECT COALESCE(SUM(amount), 0) FROM payments p WHERE p.contract_id = c.id)
+    + CASE WHEN c.reservation_id IS NOT NULL THEN COALESCE((
+        SELECT SUM(amount) FROM reservation_payments rp
+        WHERE rp.reservation_id = c.reservation_id AND rp.type = 'rental' AND rp.status = 'completed'
+      ), 0) ELSE 0 END
+  )`
+
+/**
+ * Remaining to collect:
+ * - reservations with no live contract
+ * - live contracts (walk-in and converted), using contract total vs paid
+ */
+export function queryUnpaidTotal(helpers: QueryHelpers) {
+  return (
+    helpers.queryOne<{ total: number }>(
+      `SELECT COALESCE(SUM(remaining), 0) as total FROM (
+         SELECT MAX(0,
+           COALESCE(r.total_amount, 0) - COALESCE((
+             SELECT SUM(rp.amount) FROM reservation_payments rp
+             WHERE rp.reservation_id = r.id AND rp.type = 'rental' AND rp.status = 'completed'
+           ), 0)
+         ) as remaining
+         FROM reservations r
+         WHERE r.status != 'cancelled'
+           AND NOT EXISTS (
+             SELECT 1 FROM contracts c
+             WHERE c.reservation_id = r.id
+               AND c.deleted_at IS NULL
+               AND c.status != 'cancelled'
+           )
+         UNION ALL
+         SELECT MAX(0, COALESCE(c.total_amount, 0) - ${CONTRACT_PAID_AMOUNT_EXPR}) as remaining
+         FROM contracts c
+         WHERE c.deleted_at IS NULL AND c.status != 'cancelled'
+       ) unpaid_rows`,
+    )?.total ?? 0
+  )
+}
