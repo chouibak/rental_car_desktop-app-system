@@ -5,7 +5,7 @@ import { PageHeader, PasswordInput } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { useAuth } from '../context/AuthContext'
 
-import type { Lang } from '../types'
+import type { Lang, LicenseStatus } from '../types'
 
 
 
@@ -167,12 +167,21 @@ export default function SettingsPage() {
   const [accountSaved, setAccountSaved] = useState(false)
   const [accountError, setAccountError] = useState('')
   const [accountLoading, setAccountLoading] = useState(false)
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null)
+  const [licenseKey, setLicenseKey] = useState('')
+  const [licenseLoading, setLicenseLoading] = useState(false)
+  const [licenseSaved, setLicenseSaved] = useState(false)
+  const [licenseError, setLicenseError] = useState('')
 
 
 
   useEffect(() => {
     setAccountNewUsername(username)
   }, [username])
+
+  useEffect(() => {
+    window.api.getLicenseStatus().then(setLicenseStatus).catch(() => setLicenseStatus(null))
+  }, [])
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -395,6 +404,46 @@ export default function SettingsPage() {
   }
 
 
+
+  const onLicenseActivate = async () => {
+    setLicenseError('')
+    setLicenseSaved(false)
+    setLicenseLoading(true)
+    try {
+      const result = await window.api.activateLicense(licenseKey)
+      if (result.ok) {
+        setLicenseStatus(result.status)
+        setLicenseKey('')
+        setLicenseSaved(true)
+        window.dispatchEvent(new Event('license-updated'))
+        setTimeout(() => setLicenseSaved(false), 2000)
+      } else {
+        const messages: Record<string, string> = {
+          INVALID_KEY: t.licenseInvalidKey,
+          LIFETIME_ACTIVE: t.licenseLifetimeActive,
+        }
+        setLicenseError(messages[result.error] || t.licenseError)
+      }
+    } catch {
+      setLicenseError(t.licenseError)
+    } finally {
+      setLicenseLoading(false)
+    }
+  }
+
+  const licenseCurrentLabel = (() => {
+    if (!licenseStatus?.activated) return t.licenseNotActivated
+    if (licenseStatus.type === 'lifetime') return t.licenseTypeLifetime
+    if (licenseStatus.expired) return t.licenseExpiredTitle
+    if (licenseStatus.type === 'trial_5min') {
+      const mins = licenseStatus.minutesRemaining ?? 0
+      const remaining = mins <= 1 ? t.licenseMinutesLeftOne : t.licenseMinutesLeft.replace('{n}', String(mins))
+      return `${t.licenseTypeTrial5min} — ${remaining}`
+    }
+    const days = licenseStatus.daysRemaining ?? 0
+    const remaining = days <= 1 ? t.licenseDaysLeftOne : t.licenseDaysLeft.replace('{n}', String(days))
+    return `${t.licenseTypeTrial} — ${remaining}`
+  })()
 
   const onSubmit = async (e: FormEvent) => {
 
@@ -784,6 +833,48 @@ export default function SettingsPage() {
         </SettingsSection>
 
 
+
+        <SettingsSection title={t.licenseSettings} hint={t.licenseSettingsHint}>
+          <div className="field full">
+            <label>{t.licenseCurrent}</label>
+            <div className="settings-license-status">
+              <span className={`settings-license-badge${licenseStatus?.type === 'lifetime' ? ' settings-license-badge--life' : licenseStatus?.isTrial ? ' settings-license-badge--trial' : ''}`}>
+                {licenseCurrentLabel}
+              </span>
+            </div>
+          </div>
+          <div className="field full">
+            <label htmlFor="settings-license-key">{t.licenseKeyLabel}</label>
+            <input
+              id="settings-license-key"
+              className="input"
+              value={licenseKey}
+              onChange={(e) => setLicenseKey(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (licenseKey.trim() && !licenseLoading) void onLicenseActivate()
+                }
+              }}
+              placeholder={t.licenseKeyPlaceholder}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <span className="field-hint">{t.licenseKeyHint}</span>
+          </div>
+          <div className="field full settings-account-actions">
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={licenseLoading || !licenseKey.trim()}
+              onClick={onLicenseActivate}
+            >
+              {licenseLoading ? t.loading : t.licenseActivate}
+            </button>
+            {licenseSaved ? <span className="settings-saved">{t.licenseActivateSuccess}</span> : null}
+            {licenseError ? <span className="settings-error">{licenseError}</span> : null}
+          </div>
+        </SettingsSection>
 
         <SettingsSection title={t.authAccount} hint={t.authAccountHint}>
 

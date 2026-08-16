@@ -38,9 +38,14 @@ export function LicenseTrialProvider({ children }: { children: ReactNode }) {
     refresh()
     const intervalMs = status?.type === 'trial_5min' ? 5000 : 30000
     const timer = window.setInterval(refresh, intervalMs)
+    const onUpdated = () => {
+      void refresh()
+    }
+    window.addEventListener('license-updated', onUpdated)
     return () => {
       active = false
       window.clearInterval(timer)
+      window.removeEventListener('license-updated', onUpdated)
     }
   }, [status?.type])
 

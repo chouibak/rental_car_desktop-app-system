@@ -4228,6 +4228,39 @@ th {
   font-size: 0.875rem;
 }
 
+.settings-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-license-status {
+  display: flex;
+  align-items: center;
+}
+
+.settings-license-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.settings-license-badge--trial {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.settings-license-badge--life {
+  background: #ecfdf5;
+  color: #047857;
+}
+
 /* Revenue page */
 .revenue-page .revenue-grid {
   display: grid;

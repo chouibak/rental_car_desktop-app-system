@@ -172,6 +172,11 @@ export function activateLicense(rawKey: string): { ok: true; status: LicenseStat
   const type = matchKeyType(key)
   if (!type) return { ok: false, error: 'INVALID_KEY' }
 
+  const current = getLicenseStatus()
+  if (current.type === 'lifetime' && type !== 'lifetime') {
+    return { ok: false, error: 'LIFETIME_ACTIVE' }
+  }
+
   writeStoredLicense(type)
   return { ok: true, status: getLicenseStatus() }
 }
