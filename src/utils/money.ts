@@ -1,6 +1,13 @@
-/** Keep amounts readable in RTL (Arabic) — same order as French: 4 900,00 DH */
+/** Keep amounts readable in RTL (Arabic): DH 1,500.00 */
 export function wrapLtr(text: string) {
   return `\u2066${text}\u2069`
+}
+
+export function formatNumber(value: number) {
+  const n = Math.round(Number(value || 0))
+  const negative = n < 0
+  const grouped = String(Math.abs(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return `${negative ? '-' : ''}${grouped}`
 }
 
 export function formatMoneyAmount(
@@ -14,14 +21,14 @@ export function formatMoneyAmount(
   const abs = Math.abs(value)
   const fixed = abs.toFixed(maximumFractionDigits)
   const [intPart, decPart = ''] = fixed.split('.')
-  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
   const decimals =
     maximumFractionDigits > 0
-      ? `,${decPart.padEnd(minimumFractionDigits, '0').slice(0, maximumFractionDigits)}`
+      ? `.${decPart.padEnd(minimumFractionDigits, '0').slice(0, maximumFractionDigits)}`
       : ''
   return `${negative ? '-' : ''}${grouped}${decimals}`
 }
 
 export function formatMoney(amount: number, currency = 'DH') {
-  return wrapLtr(`${formatMoneyAmount(amount)} ${currency}`)
+  return wrapLtr(`${currency} ${formatMoneyAmount(amount)}`)
 }

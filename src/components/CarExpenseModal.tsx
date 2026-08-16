@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { useLang } from '../context/LangContext'
 import type { Dict } from '../i18n'
 import type { Expense, ExpenseCategory, ExpensePaymentMethod } from '../types'
+import { todayYmd } from '../utils/calendar'
+import { mapAppError } from '../utils/errors'
 
 const CAR_CATEGORIES: ExpenseCategory[] = ['fuel', 'maintenance', 'insurance', 'other']
 
@@ -33,7 +35,7 @@ const emptyForm = (): Partial<Expense> => ({
   title: '',
   category: 'maintenance',
   amount: 0,
-  expense_date: new Date().toISOString().slice(0, 10),
+  expense_date: todayYmd(),
   payment_method: 'cash',
   receipt_path: '',
   notes: '',
@@ -114,7 +116,7 @@ export function CarExpenseModal({ open, carId, carLabel, expense, onClose, onSav
       onSaved(saved)
       onClose()
     } catch (err) {
-      setError(String(err))
+      setError(mapAppError(err, t))
     } finally {
       setSaving(false)
     }

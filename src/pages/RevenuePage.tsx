@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { IconDownload } from '../components/icons'
+import { PeriodPdfModal } from '../components/PeriodPdfModal'
 import {
   HorizontalBreakdownChart,
   RevenueNetChart,
@@ -9,21 +11,51 @@ import {
 } from '../components/RevenueCharts'
 import { PageHeader, StatCard } from '../components/ui'
 import { useLang } from '../context/LangContext'
+import { useToast } from '../context/ToastContext'
+import { mapAppError } from '../utils/errors'
 import type { RevenueStats } from '../types'
 
-const PAYMENT_METHOD_KEYS = {
+const PAYMENT_METHOD_KEYS: Record<string, 'cash' | 'card' | 'bank_transfer'> = {
   cash: 'cash',
   card: 'card',
+  transfer: 'bank_transfer',
   bank_transfer: 'bank_transfer',
-} as const
+}
+
+function currentYear() {
+  return new Date().getFullYear()
+}
+
+function currentMonth() {
+  return new Date().getMonth() + 1
+}
 
 export default function RevenuePage() {
-  const { t, money } = useLang()
+  const { t, money, lang } = useLang()
+  const { showError } = useToast()
   const [stats, setStats] = useState<RevenueStats | null>(null)
+  const [error, setError] = useState('')
+  const [year, setYear] = useState(currentYear)
+  const [month, setMonth] = useState(currentMonth)
+  const [pdfOpen, setPdfOpen] = useState(false)
+  const [pdfSaving, setPdfSaving] = useState(false)
+
+  const years = useMemo(() => {
+    const y = currentYear()
+    return [y, y - 1, y - 2, y - 3]
+  }, [])
+
+  const monthOptions = useMemo(() => {
+    const locale = lang === 'ar' ? 'ar-MA' : 'fr-FR'
+    return Array.from({ length: 12 }, (_, index) => ({
+      value: index + 1,
+      label: new Date(2000, index, 1).toLocaleDateString(locale, { month: 'long' }),
+    }))
+  }, [lang])
 
   useEffect(() => {
-    window.api.getRevenueStats().then(setStats)
-  }, [])
+    window.api.getRevenueStats().then(setStats).catch(() => setError(t.loadFailed))
+  }, [t])
 
   const growthHint = useMemo(() => {
     if (!stats || stats.month_growth_pct === null) return t.noData
@@ -31,6 +63,20 @@ export default function RevenuePage() {
     return `${sign}${stats.month_growth_pct}%`
   }, [stats, t.noData])
 
+  const onDownloadPdf = async () => {
+    setPdfSaving(true)
+    try {
+      const result = await window.api.exportRevenuePdf(year, month)
+      if (result?.ok) setPdfOpen(false)
+      else if (!result?.canceled) showError(t.saveFailed)
+    } catch (err) {
+      showError(mapAppError(err, t))
+    } finally {
+      setPdfSaving(false)
+    }
+  }
+
+  if (error) return <div className="empty">{error}</div>
   if (!stats) return <div className="empty">{t.loading}</div>
 
   const growthTone =
@@ -40,6 +86,10 @@ export default function RevenuePage() {
     <div className="revenue-page">
       <PageHeader title={t.revenue} subtitle={t.revenueSubtitle}>
         <div className="toolbar-actions">
+          <button type="button" className="btn" onClick={() => setPdfOpen(true)}>
+            <IconDownload size={15} />
+            {t.downloadPdf}
+          </button>
           <Link className="btn secondary sm" to="/payments">
             {t.payments}
           </Link>
@@ -125,12 +175,30 @@ export default function RevenuePage() {
             ) : (
               <HorizontalBreakdownChart
                 rows={toMethodRows(stats.by_payment_method)}
-                labelForKey={(key) => t[PAYMENT_METHOD_KEYS[key as keyof typeof PAYMENT_METHOD_KEYS] ?? 'cash'] ?? key}
+                labelForKey={(key) => {
+                  const mapped = PAYMENT_METHOD_KEYS[key]
+                  return mapped ? t[mapped] : key
+                }}
               />
             )}
           </div>
         </div>
       </div>
+
+      {pdfOpen ? (
+        <PeriodPdfModal
+          open={pdfOpen}
+          year={year}
+          month={month}
+          years={years}
+          monthOptions={monthOptions}
+          saving={pdfSaving}
+          onYearChange={setYear}
+          onMonthChange={setMonth}
+          onCancel={() => setPdfOpen(false)}
+          onConfirm={onDownloadPdf}
+        />
+      ) : null}
     </div>
   )
 }

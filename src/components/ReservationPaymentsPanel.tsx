@@ -5,6 +5,7 @@ import { IconEdit, IconPlus, IconTrash } from './icons'
 import { EmptyState, PaymentBadge } from './ui'
 import { useLang } from '../context/LangContext'
 import type {
+  PaymentMethod,
   Reservation,
   ReservationPayment,
   ReservationPaymentInput,
@@ -13,6 +14,8 @@ import type {
   ReservationPaymentType,
 } from '../types'
 import type { Dict } from '../i18n'
+import { deletePayment, paymentErrorMessage, savePayment } from '../utils/payments'
+import { todayYmd } from '../utils/calendar'
 
 const PAYMENT_TYPES: ReservationPaymentType[] = ['rental', 'deposit', 'deposit_return']
 const PAYMENT_METHODS: ReservationPaymentMethod[] = ['cash', 'card', 'bank_transfer']
@@ -30,9 +33,10 @@ const TYPE_LABELS: Record<ReservationPaymentType, keyof Dict> = {
   deposit_return: 'depositReturnPayment',
 }
 
-const METHOD_LABELS: Record<ReservationPaymentMethod, keyof Dict> = {
+const METHOD_LABELS: Record<string, keyof Dict> = {
   cash: 'cash',
   card: 'card',
+  transfer: 'transfer',
   bank_transfer: 'bank_transfer',
 }
 
@@ -57,7 +61,7 @@ const emptyForm = (reservationId?: number): ReservationPaymentInput => ({
   status: 'completed',
   reference: '',
   notes: '',
-  paid_at: new Date().toISOString().slice(0, 10),
+  paid_at: todayYmd(),
 })
 
 export function ReservationPaymentsPanel({
@@ -97,7 +101,15 @@ export function ReservationPaymentsPanel({
       type: filters?.type || undefined,
       status: filters?.status || undefined,
     })
-    setPayments(list)
+    setPayments(
+      [...list].sort((a, b) => {
+        const paidDiff = new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime()
+        if (Number.isFinite(paidDiff) && paidDiff !== 0) return paidDiff
+        const createdDiff = new Date(b.created_at || b.paid_at).getTime() - new Date(a.created_at || a.paid_at).getTime()
+        if (Number.isFinite(createdDiff) && createdDiff !== 0) return createdDiff
+        return (b.id || 0) - (a.id || 0)
+      }),
+    )
     if (reservationId) await refreshReservationSummary(reservationId)
     if (notify) onPaymentsChange?.()
   }
@@ -161,11 +173,11 @@ export function ReservationPaymentsPanel({
       reservation_id: payment.reservation_id,
       type: payment.type,
       amount: payment.amount,
-      method: payment.method,
+      method: payment.method === 'transfer' ? 'bank_transfer' : payment.method,
       status: payment.status,
       reference: payment.reference,
       notes: payment.notes,
-      paid_at: payment.paid_at,
+      paid_at: payment.paid_at?.slice(0, 10),
     })
     setError('')
     setOpen(true)
@@ -174,41 +186,43 @@ export function ReservationPaymentsPanel({
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
+
+    const targetReservationId = reservationId ?? Number(form.reservation_id)
+    if (editing?.source !== 'contract' && !targetReservationId) {
+      setError(t.selectReservation)
+      return
+    }
+
     setSaving(true)
-
     try {
-      const payload = {
-        ...form,
-        reservation_id: reservationId ?? Number(form.reservation_id),
-        status: (editing ? form.status : 'completed') as ReservationPaymentRecordStatus,
-        reference: form.reference || undefined,
-        notes: form.notes || '',
-      }
-
-      if (!payload.reservation_id) {
-        setError(t.selectReservation)
-        return
-      }
-
-      if (editing) await window.api.updateReservationPayment(editing.id, payload)
-      else await window.api.createReservationPayment(payload)
-
+      await savePayment({
+        source: editing?.source ?? 'reservation',
+        id: editing?.id,
+        contract_id: editing?.contract_id,
+        reservation_id: targetReservationId,
+        type: form.type,
+        amount: form.amount,
+        method: form.method as PaymentMethod,
+        status: editing ? form.status : 'completed',
+        paid_at: form.paid_at ?? '',
+        note: form.notes || '',
+      })
       setOpen(false)
       await loadPayments(true)
     } catch (err) {
-      setError(String(err))
+      setError(paymentErrorMessage(err, t))
     } finally {
       setSaving(false)
     }
   }
 
-  const onDelete = async (id: number) => {
+  const onDelete = async (payment: ReservationPayment) => {
     if (!confirm(t.confirmDelete)) return
     try {
-      await window.api.deleteReservationPayment(id)
+      await deletePayment({ source: payment.source ?? 'reservation', id: payment.id })
       await loadPayments(true)
-    } catch {
-      alert(t.cannotDeletePayment)
+    } catch (err) {
+      alert(paymentErrorMessage(err, t))
     }
   }
 
@@ -246,6 +260,7 @@ export function ReservationPaymentsPanel({
           <thead>
             <tr>
               <th>{t.paymentReference}</th>
+              <th>{t.source}</th>
               {showReservationLink && <th>{t.reservationRef}</th>}
               {showReservationLink && <th>{t.paymentStatus}</th>}
               {!reservationId && <th>{t.customer}</th>}
@@ -260,21 +275,32 @@ export function ReservationPaymentsPanel({
           <tbody>
             {payments.length === 0 && (
               <tr>
-                <td colSpan={showReservationLink ? 10 : reservationId ? 7 : 8}>
+                <td colSpan={showReservationLink ? 11 : reservationId ? 8 : 9}>
                   <EmptyState message={t.noData} />
                 </td>
               </tr>
             )}
             {payments.map((payment) => (
-              <tr key={payment.id}>
+              <tr key={`${payment.source || 'reservation'}-${payment.id}`}>
                 <td>
                   <strong>{payment.reference}</strong>
                 </td>
+                <td>
+                  {payment.source === 'contract' ? t.paymentFromContract : t.paymentFromReservation}
+                </td>
                 {showReservationLink && (
                   <td>
-                    <Link className="link-btn" to={`/reservations/${payment.reservation_id}`}>
-                      {payment.reservation_reference}
-                    </Link>
+                    {payment.source === 'contract' && payment.contract_id ? (
+                      <Link className="link-btn" to={`/contracts/${payment.contract_id}`}>
+                        {payment.contract_number || payment.reference}
+                      </Link>
+                    ) : payment.reservation_id ? (
+                      <Link className="link-btn" to={`/reservations/${payment.reservation_id}`}>
+                        {payment.reservation_reference}
+                      </Link>
+                    ) : (
+                      '—'
+                    )}
                   </td>
                 )}
                 {showReservationLink && (
@@ -289,15 +315,15 @@ export function ReservationPaymentsPanel({
                 {!reservationId && <td>{payment.customer_name}</td>}
                 <td>{t[TYPE_LABELS[payment.type]]}</td>
                 <td>{money(payment.amount)}</td>
-                <td>{t[METHOD_LABELS[payment.method]]}</td>
+                <td>{t[METHOD_LABELS[payment.method] || 'cash']}</td>
                 <td>{t[STATUS_LABELS[payment.status]]}</td>
-                <td>{payment.paid_at}</td>
+                <td>{payment.paid_at?.slice(0, 10)}</td>
                 <td>
                   <div className="row-actions">
                     <button className="btn secondary sm icon-only" onClick={() => openEdit(payment)} title={t.edit}>
                       <IconEdit size={15} />
                     </button>
-                    <button className="btn danger sm icon-only" onClick={() => onDelete(payment.id)} title={t.delete}>
+                    <button className="btn danger sm icon-only" onClick={() => onDelete(payment)} title={t.delete}>
                       <IconTrash size={15} />
                     </button>
                   </div>
@@ -321,7 +347,7 @@ export function ReservationPaymentsPanel({
               </header>
 
               <div className="payment-modal-body">
-                {!reservationId && (
+                {!reservationId && editing?.source !== 'contract' && (
                   <div className="field">
                     <label>{t.reservationRef}</label>
                     <select
@@ -371,20 +397,22 @@ export function ReservationPaymentsPanel({
                   </div>
                 )}
 
-                <div className="field">
-                  <label>{t.paymentType}</label>
-                  <select
-                    className="select"
-                    value={form.type}
-                    onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as ReservationPaymentType }))}
-                  >
-                    {PAYMENT_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {t[TYPE_LABELS[type]]}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {editing?.source !== 'contract' && (
+                  <div className="field">
+                    <label>{t.paymentType}</label>
+                    <select
+                      className="select"
+                      value={form.type}
+                      onChange={(e) => setForm((f) => ({ ...f, type: e.target.value as ReservationPaymentType }))}
+                    >
+                      {PAYMENT_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {t[TYPE_LABELS[type]]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {activeReservation && form.type === 'rental' && (
                   <p className="payment-modal-hint">

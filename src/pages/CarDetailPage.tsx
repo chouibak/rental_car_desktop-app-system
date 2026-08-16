@@ -20,6 +20,7 @@ import type { Dict } from '../i18n'
 import { FUEL_FRACTION, formatContractDatetime } from '../utils/contracts'
 import { formatDisplayDate } from '../utils/customer'
 import { getDocExpiryInfo } from '../utils/docExpiry'
+import { formatNumber } from '../utils/money'
 import { computeVidangeStatus, formatKm, formatVidangeBadgeLabel, getVidangeTrafficLevel } from '../utils/vidange'
 import type { Car, CarComputedStatus, CarVidange, Expense, ExpenseCategory } from '../types'
 
@@ -103,7 +104,13 @@ export default function CarDetailPage() {
   useEffect(() => {
     if (!id) return
     const carId = Number(id)
+    if (!Number.isFinite(carId) || carId <= 0) {
+      navigate('/cars')
+      return
+    }
+    let stale = false
     window.api.getCar(carId).then(async (data) => {
+      if (stale) return
       if (!data) {
         navigate('/cars')
         return
@@ -114,6 +121,7 @@ export default function CarDetailPage() {
       for (const img of data.images ?? []) {
         photos[img.path] = await window.api.getCarFileUrl(img.path)
       }
+      if (stale) return
       setPhotoUrls(photos)
 
       const firstImage = data.images?.[0]?.path
@@ -121,13 +129,19 @@ export default function CarDetailPage() {
         setActivePhoto(firstImage)
       } else if (data.thumbnail) {
         const thumbUrl = await window.api.getCarFileUrl(data.thumbnail)
+        if (stale) return
         setPhotoUrls((prev) => ({ ...prev, [data.thumbnail!]: thumbUrl }))
         setActivePhoto(data.thumbnail)
       }
+    }).catch(() => {
+      if (!stale) navigate('/cars')
     })
 
     loadExpenses(carId)
     loadVidanges(carId)
+    return () => {
+      stale = true
+    }
   }, [id, navigate, loadExpenses, loadVidanges])
 
   useEffect(() => {
@@ -202,7 +216,7 @@ export default function CarDetailPage() {
   const vidangeRemainingText = useMemo(() => {
     if (!vidangeStatus || vidangeStatus.never_done) return null
     if (vidangeStatus.km_remaining == null) return null
-    const n = Math.abs(Math.round(vidangeStatus.km_remaining)).toLocaleString('fr-FR')
+    const n = formatNumber(Math.abs(vidangeStatus.km_remaining))
     if (vidangeStatus.km_remaining <= 0) return t.vidangeKmOverdue.replace('{n}', n)
     return t.vidangeKmRemaining.replace('{n}', n)
   }, [vidangeStatus, t])
@@ -368,7 +382,7 @@ export default function CarDetailPage() {
     { label: t.seats, value: car.seats },
     { label: t.fuel, value: t[car.fuel as keyof typeof t] ?? car.fuel },
     { label: t.bags, value: car.bags },
-    { label: t.mileage, value: car.mileage?.toLocaleString() ?? '0' },
+    { label: t.mileage, value: car.mileage != null ? formatNumber(car.mileage) : '0' },
     { label: t.fuelLevel, value: FUEL_FRACTION[car.fuel_level as keyof typeof FUEL_FRACTION] || car.fuel_level || '—' },
     { label: t.badge, value: car.badge || '—' },
     { label: t.status, value: t[carStatus as keyof typeof t] ?? carStatus },

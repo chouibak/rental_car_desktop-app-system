@@ -9,10 +9,10 @@ import type { Car, Customer, Reservation, ReservationStatus } from '../types'
 
 const STATUSES: ReservationStatus[] = ['pending', 'confirmed', 'cancelled', 'completed']
 
-function formatDatetime(value: string) {
+function formatDatetime(value: string, locale: string) {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
+  return d.toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })
 }
 
 function reservationPaymentStatus(paid: number, total: number) {
@@ -22,7 +22,8 @@ function reservationPaymentStatus(paid: number, total: number) {
 }
 
 export default function ReservationsPage() {
-  const { t, money } = useLang()
+  const { t, money, lang } = useLang()
+  const locale = lang === 'ar' ? 'ar-MA' : 'fr-FR'
   const navigate = useNavigate()
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [cars, setCars] = useState<Car[]>([])
@@ -224,8 +225,8 @@ export default function ReservationsPage() {
                         <div className="muted-text">{r.car_plate}</div>
                       </td>
                       <td>
-                        {formatDatetime(r.pickup_date)}
-                        <div className="muted-text">→ {formatDatetime(r.return_date)}</div>
+                        {formatDatetime(r.pickup_date, locale)}
+                        <div className="muted-text">→ {formatDatetime(r.return_date, locale)}</div>
                       </td>
                       <td>{money(r.total_amount)}</td>
                       <td>{money(paid)}</td>

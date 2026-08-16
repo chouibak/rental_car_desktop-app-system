@@ -15,9 +15,19 @@ export default function ChauffeursPage() {
   const navigate = useNavigate()
   const [chauffeurs, setChauffeurs] = useState<Chauffeur[]>([])
   const [q, setQ] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const load = async () => {
-    setChauffeurs(await window.api.listChauffeurs(q ? { q } : undefined))
+    setLoading(true)
+    setError('')
+    try {
+      setChauffeurs(await window.api.listChauffeurs(q ? { q } : undefined))
+    } catch {
+      setError(t.loadFailed)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -74,7 +84,7 @@ export default function ChauffeursPage() {
               {chauffeurs.length === 0 && (
                 <tr>
                   <td colSpan={7}>
-                    <EmptyState message={t.noData} />
+                    <EmptyState message={loading ? t.loading : error || t.noData} />
                   </td>
                 </tr>
               )}

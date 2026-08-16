@@ -88,6 +88,7 @@ const api = {
   getExpenseFileUrl: (filePath: string) => ipcRenderer.invoke('expenses:getFileUrl', filePath),
   openExpenseFile: (filePath: string) => ipcRenderer.invoke('expenses:openFile', filePath),
   exportExpensesExcel: (filters?: unknown) => ipcRenderer.invoke('expenses:exportExcel', filters),
+  exportExpensesPdf: (year: number, month: number) => ipcRenderer.invoke('expenses:exportPdf', year, month),
 
   listVidanges: (carId: number) => ipcRenderer.invoke('vidange:list', carId),
   getVidangeStatus: (carId: number) => ipcRenderer.invoke('vidange:status', carId),
@@ -107,6 +108,7 @@ const api = {
   openChauffeurFile: (filePath: string) => ipcRenderer.invoke('chauffeurs:openFile', filePath),
 
   getRevenueStats: () => ipcRenderer.invoke('revenue:stats'),
+  exportRevenuePdf: (year: number, month: number) => ipcRenderer.invoke('revenue:exportPdf', year, month),
 
   getNotifications: () => ipcRenderer.invoke('notifications:list'),
   getNotificationCounts: () => ipcRenderer.invoke('notifications:counts'),

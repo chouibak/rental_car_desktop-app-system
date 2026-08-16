@@ -14,7 +14,22 @@ export function LicenseGate({ children }: Props) {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    window.api.getLicenseStatus().then(setStatus)
+    window.api
+      .getLicenseStatus()
+      .then(setStatus)
+      .catch(() =>
+        setStatus({
+          valid: false,
+          activated: false,
+          type: null,
+          activatedAt: null,
+          expiresAt: null,
+          daysRemaining: null,
+          minutesRemaining: null,
+          expired: true,
+          isTrial: false,
+        }),
+      )
   }, [])
 
   if (!status) {

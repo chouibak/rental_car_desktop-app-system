@@ -296,6 +296,8 @@ export type Contract = {
   customer_signed_at?: string
   agency_signed_at?: string
   deleted_at?: string | null
+  created_at?: string
+  updated_at?: string
   is_overdue?: boolean
   reservation_reference?: string
   start_date: string
@@ -317,9 +319,20 @@ export type Contract = {
   reservation_contract_count?: number
 }
 
-export type ContractInput = Partial<Contract> & {
+export type ContractDamage = {
+  part: string
+  type: string
+  note: string
+  photo?: string
+  video?: string
+}
+
+/** Damage lists may be sent as rows; the main process serialises them before storing. */
+export type ContractInput = Partial<Omit<Contract, 'departure_damages' | 'return_damages'>> & {
   client_id?: number
   car_id?: number
+  departure_damages?: string | ContractDamage[]
+  return_damages?: string | ContractDamage[]
 }
 
 export type ContractStats = {
@@ -332,34 +345,46 @@ export type ContractStats = {
   overdue: number
 }
 
+/** Which ledger a payment row belongs to. */
+export type PaymentRecordSource = 'contract' | 'reservation'
+
 export type Payment = {
   id: number
   contract_id: number
+  reservation_id?: number
   amount: number
   method: string
+  status?: PaymentRecordStatus
   paid_at: string
   note: string
+  reference?: string
   contract_number?: string
   client_name?: string
-  source?: 'contract' | 'reservation'
+  source?: PaymentRecordSource
 }
 
 export type ReservationPaymentType = 'rental' | 'deposit' | 'deposit_return'
-export type ReservationPaymentMethod = 'cash' | 'card' | 'bank_transfer'
-export type ReservationPaymentRecordStatus = 'completed' | 'pending' | 'cancelled'
+export type PaymentMethod = 'cash' | 'card' | 'bank_transfer'
+export type PaymentRecordStatus = 'completed' | 'pending' | 'cancelled'
+/** @deprecated use PaymentMethod / PaymentRecordStatus */
+export type ReservationPaymentMethod = PaymentMethod
+export type ReservationPaymentRecordStatus = PaymentRecordStatus
 
 export type ReservationPayment = {
   id: number
   reservation_id: number
   type: ReservationPaymentType
   amount: number
-  method: ReservationPaymentMethod
+  method: ReservationPaymentMethod | 'transfer'
   status: ReservationPaymentRecordStatus
   reference: string
   notes: string
   paid_at: string
   created_at?: string
   updated_at?: string
+  source?: 'reservation' | 'contract'
+  contract_id?: number | null
+  contract_number?: string | null
   reservation_reference?: string
   customer_name?: string
   car_name?: string
@@ -733,6 +758,10 @@ declare global {
         date_from?: string
         date_to?: string
       }) => Promise<{ ok: boolean; canceled?: boolean; filePath?: string }>
+      exportExpensesPdf: (
+        year: number,
+        month: number,
+      ) => Promise<{ ok: boolean; canceled?: boolean; path?: string }>
       listVidanges: (carId: number) => Promise<CarVidange[]>
       getVidangeStatus: (carId: number) => Promise<VidangeStatus | null>
       createVidange: (data: CarVidangeInput) => Promise<CarVidange>
@@ -747,6 +776,10 @@ declare global {
         intervalMonths: number,
       ) => Promise<VidangeStatus | null>
       getRevenueStats: () => Promise<RevenueStats>
+      exportRevenuePdf: (
+        year: number,
+        month: number,
+      ) => Promise<{ ok: boolean; canceled?: boolean; path?: string }>
       getNotifications: () => Promise<Notification[]>
       getNotificationCounts: () => Promise<NotificationCounts>
       getSettings: () => Promise<Settings>

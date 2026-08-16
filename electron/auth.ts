@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { writeJsonFileAtomic } from './storage'
 
 export type AuthSession = {
   authenticated: boolean
@@ -112,7 +113,7 @@ function writePersistedSession(token: string, username: string, remember: boolea
   const expiresAt = new Date(Date.now() + REMEMBER_MS).toISOString()
   const signature = signSession(token, username, expiresAt)
   const payload: StoredSession = { token, username, expiresAt, remember, signature }
-  fs.writeFileSync(sessionFilePath, JSON.stringify(payload), 'utf8')
+  writeJsonFileAtomic(sessionFilePath, payload)
 }
 
 function readPersistedSession(): StoredSession | null {

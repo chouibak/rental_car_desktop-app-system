@@ -268,79 +268,91 @@ export function DriverFields({ prefix, form, setForm, t, required = false, onCop
   }
 
   return (
-    <>
-      {onCopyFromCustomer && (
-        <div className="field full">
-          <button type="button" className="btn secondary btn-sm" onClick={onCopyFromCustomer}>
+    <div className="driver-admin">
+      {onCopyFromCustomer ? (
+        <div className="driver-admin-actions">
+          <button type="button" className="btn secondary sm" onClick={onCopyFromCustomer}>
             {t.copyFromCustomer}
           </button>
         </div>
-      )}
-      <div className="field">
-        <label>{t.driverName}{required ? ' *' : ''}</label>
-        <input
-          className="input"
-          required={required}
-          value={String(form[field('name')] ?? '')}
-          onChange={(e) => setValue('name', e.target.value)}
-        />
+      ) : null}
+
+      <div className="driver-admin-block">
+        <p className="driver-admin-label">{t.driverInfo}</p>
+        <div className="form-grid">
+          <div className="field">
+            <label>{t.driverName}{required ? ' *' : ''}</label>
+            <input
+              className="input"
+              required={required}
+              value={String(form[field('name')] ?? '')}
+              onChange={(e) => setValue('name', e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label>{t.phone}</label>
+            <input className="input" value={String(form[field('phone')] ?? '')} onChange={(e) => setValue('phone', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.birthDate}</label>
+            <input className="input" type="date" value={String(form[field('birth_date')] ?? '')} onChange={(e) => setValue('birth_date', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.birthPlace}</label>
+            <input className="input" value={String(form[field('birth_place')] ?? '')} onChange={(e) => setValue('birth_place', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.nationality}</label>
+            <input className="input" value={String(form[field('nationality')] ?? '')} onChange={(e) => setValue('nationality', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.address}</label>
+            <input className="input" value={String(form[field('address')] ?? '')} onChange={(e) => setValue('address', e.target.value)} />
+          </div>
+        </div>
       </div>
-      <div className="field">
-        <label>{t.phone}</label>
-        <input className="input" value={String(form[field('phone')] ?? '')} onChange={(e) => setValue('phone', e.target.value)} />
+
+      <div className="driver-admin-block">
+        <p className="driver-admin-label">{t.driverDocs}</p>
+        <div className="form-grid">
+          <div className="field">
+            <label>{t.cin}</label>
+            <input className="input" value={String(form[field('cin_number')] ?? '')} onChange={(e) => setValue('cin_number', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.cinIssuedAt}</label>
+            <input className="input" type="date" value={String(form[field('cin_issued_at')] ?? '')} onChange={(e) => setValue('cin_issued_at', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.cinExpiresAt}</label>
+            <input className="input" type="date" value={String(form[field('cin_expires_at')] ?? '')} onChange={(e) => setValue('cin_expires_at', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.license}</label>
+            <input className="input" value={String(form[field('license_number')] ?? '')} onChange={(e) => setValue('license_number', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.licenseIssuedAt}</label>
+            <input className="input" type="date" value={String(form[field('license_issued_at')] ?? '')} onChange={(e) => setValue('license_issued_at', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.licenseExpiresAt}</label>
+            <input className="input" type="date" value={String(form[field('license_expires_at')] ?? '')} onChange={(e) => setValue('license_expires_at', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.passportNumber}</label>
+            <input className="input" value={String(form[field('passport_number')] ?? '')} onChange={(e) => setValue('passport_number', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.passportIssuedAt}</label>
+            <input className="input" type="date" value={String(form[field('passport_issued_at')] ?? '')} onChange={(e) => setValue('passport_issued_at', e.target.value)} />
+          </div>
+          <div className="field">
+            <label>{t.passportExpiresAt}</label>
+            <input className="input" type="date" value={String(form[field('passport_expires_at')] ?? '')} onChange={(e) => setValue('passport_expires_at', e.target.value)} />
+          </div>
+        </div>
       </div>
-      <div className="field">
-        <label>{t.birthDate}</label>
-        <input className="input" type="date" value={String(form[field('birth_date')] ?? '')} onChange={(e) => setValue('birth_date', e.target.value)} />
-      </div>
-      <div className="field">
-        <label>{t.birthPlace}</label>
-        <input className="input" value={String(form[field('birth_place')] ?? '')} onChange={(e) => setValue('birth_place', e.target.value)} />
-      </div>
-      <div className="field">
-        <label>{t.nationality}</label>
-        <input className="input" value={String(form[field('nationality')] ?? '')} onChange={(e) => setValue('nationality', e.target.value)} />
-      </div>
-      <div className="field full">
-        <label>{t.address}</label>
-        <input className="input" value={String(form[field('address')] ?? '')} onChange={(e) => setValue('address', e.target.value)} />
-      </div>
-      <div className="field">
-        <label>{t.cin}</label>
-        <input className="input" value={String(form[field('cin_number')] ?? '')} onChange={(e) => setValue('cin_number', e.target.value)} />
-      </div>
-      <div className="field">
-        <label>{t.cinIssuedAt}</label>
-        <input className="input" type="date" value={String(form[field('cin_issued_at')] ?? '')} onChange={(e) => setValue('cin_issued_at', e.target.value)} />
-      </div>
-      <div className="field">
-        <label>{t.cinExpiresAt}</label>
-        <input className="input" type="date" value={String(form[field('cin_expires_at')] ?? '')} onChange={(e) => setValue('cin_expires_at', e.target.value)} />
-      </div>
-      <div className="field">
-        <label>{t.passportNumber}</label>
-        <input className="input" value={String(form[field('passport_number')] ?? '')} onChange={(e) => setValue('passport_number', e.target.value)} />
-      </div>
-      <div className="field">
-        <label>{t.passportIssuedAt}</label>
-        <input className="input" type="date" value={String(form[field('passport_issued_at')] ?? '')} onChange={(e) => setValue('passport_issued_at', e.target.value)} />
-      </div>
-      <div className="field">
-        <label>{t.passportExpiresAt}</label>
-        <input className="input" type="date" value={String(form[field('passport_expires_at')] ?? '')} onChange={(e) => setValue('passport_expires_at', e.target.value)} />
-      </div>
-      <div className="field">
-        <label>{t.license}</label>
-        <input className="input" value={String(form[field('license_number')] ?? '')} onChange={(e) => setValue('license_number', e.target.value)} />
-      </div>
-      <div className="field">
-        <label>{t.licenseIssuedAt}</label>
-        <input className="input" type="date" value={String(form[field('license_issued_at')] ?? '')} onChange={(e) => setValue('license_issued_at', e.target.value)} />
-      </div>
-      <div className="field">
-        <label>{t.licenseExpiresAt}</label>
-        <input className="input" type="date" value={String(form[field('license_expires_at')] ?? '')} onChange={(e) => setValue('license_expires_at', e.target.value)} />
-      </div>
-    </>
+    </div>
   )
 }

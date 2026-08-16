@@ -7,9 +7,8 @@ import {
   moveToCarStorage,
 } from './storage'
 import { deleteExpenseStorage } from './expense-storage'
+import { SQL_NOW } from './local-date'
 import { syncAllCarsLastVidange, syncCarLastVidange } from './vidange-db'
-import { agentLog } from './debug-log'
-
 export type CarCategory = 'economique' | 'compacte' | 'suv' | '4x4' | 'monospace'
 export type CarTransmission = 'manuelle' | 'automatique'
 export type CarFuel = 'Essence' | 'Diesel' | 'Hybride' | 'Électrique'
@@ -148,6 +147,16 @@ function statusToAvailable(status: CarComputedStatus): number {
   return status === 'disponible' ? 1 : 0
 }
 
+/**
+ * A reservation only holds the car once the pickup time has passed: before that the car
+ * is still physically available, even though the dates are already booked.
+ */
+const RESERVATION_IN_PROGRESS = `
+  r.status IN ('pending', 'confirmed')
+  AND datetime(r.pickup_date) <= ${SQL_NOW}
+  AND datetime(r.return_date) > ${SQL_NOW}
+`
+
 const RETURN_DATE_SQL = `
   (
     SELECT d FROM (
@@ -160,13 +169,12 @@ const RETURN_DATE_SQL = `
       SELECT r.return_date AS d
       FROM reservations r
       WHERE r.car_id = c.id
-        AND r.status IN ('pending', 'confirmed')
-        AND datetime(r.return_date) > datetime('now')
+        AND ${RESERVATION_IN_PROGRESS}
         AND NOT EXISTS (
           SELECT 1 FROM contracts c2
           WHERE c2.reservation_id = r.id
             AND c2.deleted_at IS NULL
-            AND c2.status IN ('closed', 'cancelled')
+            AND c2.status = 'closed'
         )
     )
     WHERE d IS NOT NULL AND TRIM(d) != ''
@@ -352,31 +360,43 @@ export function migrateCarStatusColumn(db: Database, helpers: DbHelpers) {
   `)
 }
 
+/** Keep a blank or malformed numeric field from reaching the database as NaN. */
+function safeNumber(value: unknown, fallback: number, min = 0) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.max(min, parsed)
+}
+
 function normalizeCarInput(data: CarInput) {
   const status = parseCarStatus(data)
+  const name = data.name?.trim() ?? ''
+  const plate = data.plate_number?.trim() ?? ''
+  if (!name) throw new Error('NAME_REQUIRED')
+  if (!plate) throw new Error('PLATE_REQUIRED')
+  const year = Number(data.year)
   return {
-    name: data.name.trim(),
-    brand: data.brand.trim(),
-    model: data.model.trim(),
-    year: data.year ?? null,
+    name,
+    brand: data.brand?.trim() ?? '',
+    model: data.model?.trim() ?? '',
+    year: Number.isFinite(year) && year > 0 ? year : null,
     color: data.color ?? '',
-    plate_number: data.plate_number.trim(),
+    plate_number: plate,
     category: data.category ?? 'compacte',
-    price_per_day: Number(data.price_per_day) || 0,
+    price_per_day: safeNumber(data.price_per_day, 0),
     transmission: data.transmission ?? 'manuelle',
-    seats: data.seats ?? 5,
+    seats: safeNumber(data.seats, 5, 1),
     fuel: data.fuel ?? 'Essence',
-    bags: data.bags ?? 2,
+    bags: safeNumber(data.bags, 2),
     badge: data.badge ?? '',
     status,
     is_available: statusToAvailable(status),
-    mileage: data.mileage ?? 0,
+    mileage: safeNumber(data.mileage, 0),
     fuel_level: data.fuel_level ?? '',
     condition_notes: data.condition_notes ?? '',
-    vidange_interval_km: Math.max(0, Number(data.vidange_interval_km ?? 10000) || 0),
-    vidange_interval_months: Math.max(0, Number(data.vidange_interval_months ?? 6) || 0),
+    vidange_interval_km: safeNumber(data.vidange_interval_km, 10000),
+    vidange_interval_months: safeNumber(data.vidange_interval_months, 6),
     vidange_last_date: data.vidange_last_date ?? '',
-    vidange_last_mileage: Math.max(0, Number(data.vidange_last_mileage ?? 0) || 0),
+    vidange_last_mileage: safeNumber(data.vidange_last_mileage, 0),
     doc_carte_grise_path: data.doc_carte_grise_path ?? '',
     doc_carte_grise_expiry: data.doc_carte_grise_expiry ?? '',
     doc_assurance_path: data.doc_assurance_path ?? '',
@@ -446,7 +466,8 @@ function finalizeDocumentPaths(carId: number, data: ReturnType<typeof normalizeC
   return result
 }
 
-/** Keep existing document files when the form sends a blank or display-only basename. */
+/** Keep existing document files when the form sends a display-only basename.
+ *  An empty string is an intentional clear (user removed the document). */
 function mergeDocumentPaths(
   existing: CarRecord,
   next: ReturnType<typeof normalizeCarInput>,
@@ -457,10 +478,7 @@ function mergeDocumentPaths(
     const key = col as keyof typeof merged
     const incoming = String(merged[key] ?? '')
     const previous = String(existing[col as keyof CarRecord] ?? '')
-    if (!incoming) {
-      ;(merged as unknown as Record<string, string>)[col] = previous
-      continue
-    }
+    if (!incoming) continue
     // Display basename only (no path separators) and already stored under previous path.
     if (
       previous &&
@@ -496,77 +514,31 @@ function deleteRemovedDocuments(
   }
 }
 
-/** Keep the linked active/closed contract in sync when car state is edited. */
+/** Keep the linked *live* contract in sync when car mileage/fuel is edited.
+ *  Closed rentals are history — never overwrite their handover fields from a car form save. */
 function syncContractHandoverFromCar(
   helpers: DbHelpers,
   carId: number,
   data: { mileage: number; fuel_level: string; condition_notes: string },
 ) {
-  const active = helpers.queryOne<{
+  const latest = helpers.queryOne<{
     id: number
     status: string
     departure_mileage: number
     return_mileage: number
   }>(
     `SELECT id, status, departure_mileage, return_mileage FROM contracts
-     WHERE car_id = ? AND deleted_at IS NULL AND status = 'active'
-     ORDER BY id DESC
+     WHERE car_id = ? AND deleted_at IS NULL AND status IN ('active', 'draft')
+     ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, id DESC
      LIMIT 1`,
     [carId],
   )
-
-  const closed = !active
-    ? helpers.queryOne<{
-        id: number
-        status: string
-        departure_mileage: number
-        return_mileage: number
-      }>(
-        `SELECT id, status, departure_mileage, return_mileage FROM contracts
-         WHERE car_id = ? AND deleted_at IS NULL AND status = 'closed'
-         ORDER BY datetime(COALESCE(NULLIF(closed_at, ''), updated_at)) DESC, id DESC
-         LIMIT 1`,
-        [carId],
-      )
-    : null
-
-  const draft = !active && !closed
-    ? helpers.queryOne<{
-        id: number
-        status: string
-        departure_mileage: number
-        return_mileage: number
-      }>(
-        `SELECT id, status, departure_mileage, return_mileage FROM contracts
-         WHERE car_id = ? AND deleted_at IS NULL AND status = 'draft'
-         ORDER BY datetime(updated_at) DESC, id DESC
-         LIMIT 1`,
-        [carId],
-      )
-    : null
-
-  const latest = active || closed || draft
   if (!latest) return
 
   const mileage = Math.max(0, Number(data.mileage) || 0)
   const fuel = data.fuel_level ?? ''
   const notes = data.condition_notes ?? ''
   const t = helpers.now()
-  const hasReturn = latest.status === 'closed' || Number(latest.return_mileage ?? 0) > 0
-
-  if (hasReturn) {
-    const safeMileage = Math.max(Number(latest.departure_mileage ?? 0), mileage)
-    helpers.run(
-      `UPDATE contracts SET
-         return_mileage = ?,
-         return_fuel_level = COALESCE(NULLIF(?, ''), return_fuel_level),
-         return_notes = COALESCE(NULLIF(?, ''), return_notes),
-         updated_at = ?
-       WHERE id = ?`,
-      [safeMileage, fuel, notes, t, latest.id],
-    )
-    return
-  }
 
   helpers.run(
     `UPDATE contracts SET
@@ -589,33 +561,20 @@ export function syncCarAvailability(helpers: DbHelpers, carId: number) {
     [carId],
   )
   // Ignore reservations already closed via a non-deleted closed/cancelled contract
-  const activeReservation = helpers.queryOne<{ id: number; pickup_date: string }>(
-    `SELECT r.id, r.pickup_date FROM reservations r
-     WHERE r.car_id = ? AND r.status IN ('pending', 'confirmed')
-       AND datetime(r.return_date) > datetime('now')
+  const runningReservation = helpers.queryOne<{ id: number }>(
+    `SELECT r.id FROM reservations r
+     WHERE r.car_id = ?
+       AND ${RESERVATION_IN_PROGRESS}
        AND NOT EXISTS (
          SELECT 1 FROM contracts c
          WHERE c.reservation_id = r.id
            AND c.deleted_at IS NULL
-           AND c.status IN ('closed', 'cancelled')
+           AND c.status = 'closed'
        )
      LIMIT 1`,
     [carId],
   )
-  const nextStatus = activeContract || activeReservation ? 'louee' : 'disponible'
-  // #region agent log
-  if (activeReservation && !activeContract) {
-    const pickupFuture = new Date(activeReservation.pickup_date).getTime() > Date.now()
-    agentLog('A', 'cars-db.ts:syncCarAvailability', 'Car status from reservation only', {
-      carId,
-      prev: car.status,
-      next: nextStatus,
-      reservationId: activeReservation.id,
-      pickup_date: activeReservation.pickup_date,
-      pickupStillFuture: pickupFuture,
-    })
-  }
-  // #endregion
+  const nextStatus = activeContract || runningReservation ? 'louee' : 'disponible'
   if (car.status === nextStatus) return
 
   helpers.run('UPDATE cars SET status = ?, is_available = ?, updated_at = ? WHERE id = ?', [
@@ -854,6 +813,7 @@ export function createCarsApi(helpers: DbHelpers) {
       }
 
       syncCarImages(helpers, id, data.images)
+      if (withDocs.status !== 'hors_service') syncCarAvailability(helpers, id)
       return this.getCar(id)
     },
 
@@ -870,6 +830,8 @@ export function createCarsApi(helpers: DbHelpers) {
         helpers.now(),
         id,
       ])
+      // Manual status is a hint; rentals still own disponible/louee unless the car is off the fleet.
+      if (status !== 'hors_service') syncCarAvailability(helpers, id)
       return this.getCar(id)
     },
 
@@ -878,8 +840,12 @@ export function createCarsApi(helpers: DbHelpers) {
         'SELECT id FROM contracts WHERE car_id = ? AND deleted_at IS NULL LIMIT 1',
         [id],
       )
+      // Only bookings that are still ahead of us block deletion; past or cancelled ones do not.
       const reserved = helpers.queryOne(
-        "SELECT id FROM reservations WHERE car_id = ? AND status IN ('pending', 'confirmed') LIMIT 1",
+        `SELECT id FROM reservations
+         WHERE car_id = ? AND status IN ('pending', 'confirmed')
+           AND datetime(return_date) > ${SQL_NOW}
+         LIMIT 1`,
         [id],
       )
       if (used || reserved) throw new Error('CAR_HAS_CONTRACTS')

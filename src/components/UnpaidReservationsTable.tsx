@@ -4,11 +4,19 @@ import { IconChevronRight } from './icons'
 import { EmptyState, PaymentBadge } from './ui'
 import { WhatsAppButton } from './WhatsAppButton'
 import { useLang } from '../context/LangContext'
-import type { Reservation } from '../types'
+import { isLiveContract } from '../utils/contracts'
 
-type UnpaidRow = Reservation & {
+type UnpaidRow = {
+  key: string
+  href: string
+  reference: string
+  customer_name: string
+  car_name: string
+  car_plate: string
+  total_amount: number
   paid_amount: number
   remaining: number
+  reservationId?: number
 }
 
 type UnpaidReservationsTableProps = {
@@ -23,25 +31,62 @@ export function UnpaidReservationsTable({ search = '', refreshKey = 0 }: UnpaidR
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let cancelled = false
     setLoading(true)
-    window.api.listReservations().then((reservations) => {
-      const unpaid = reservations
-        .filter((reservation) => reservation.status !== 'cancelled')
-        .map((reservation) => {
-          const paid_amount = reservation.paid_amount ?? 0
-          const remaining = Math.max(0, reservation.total_amount - paid_amount)
-          return {
-            ...reservation,
-            paid_amount,
-            remaining,
-          }
-        })
-        .filter((row) => row.remaining > 0)
-        .sort((a, b) => b.remaining - a.remaining)
+    Promise.all([window.api.listReservations(), window.api.listContracts()])
+      .then(([reservations, contracts]) => {
+        if (cancelled) return
+        const reservationRows: UnpaidRow[] = reservations
+          .filter((reservation) => reservation.status !== 'cancelled')
+          .map((reservation) => {
+            const paid_amount = reservation.paid_amount ?? 0
+            const remaining = Math.max(0, reservation.total_amount - paid_amount)
+            return {
+              key: `reservation-${reservation.id}`,
+              href: `/reservations/${reservation.id}`,
+              reference: reservation.reference,
+              customer_name: reservation.customer_name || '',
+              car_name: reservation.car_name || '',
+              car_plate: reservation.car_plate || '',
+              total_amount: reservation.total_amount,
+              paid_amount,
+              remaining,
+              reservationId: reservation.id,
+            }
+          })
+          .filter((row) => row.remaining > 0.001)
 
-      setRows(unpaid)
-      setLoading(false)
-    })
+        const walkInRows: UnpaidRow[] = contracts
+          .filter((contract) => isLiveContract(contract) && !contract.reservation_id)
+          .map((contract) => {
+            const paid_amount = contract.paid_amount ?? 0
+            const remaining = Math.max(0, (contract.total_amount || 0) - paid_amount)
+            return {
+              key: `contract-${contract.id}`,
+              href: `/contracts/${contract.id}`,
+              reference: contract.contract_number,
+              customer_name: contract.client_name || '',
+              car_name: [contract.brand, contract.model].filter(Boolean).join(' ') || '',
+              car_plate: contract.plate_number || '',
+              total_amount: contract.total_amount || 0,
+              paid_amount,
+              remaining,
+            }
+          })
+          .filter((row) => row.remaining > 0.001)
+
+        setRows([...reservationRows, ...walkInRows].sort((a, b) => b.remaining - a.remaining))
+        setLoading(false)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRows([])
+          setLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
   }, [refreshKey])
 
   const filtered = useMemo(() => {
@@ -89,11 +134,7 @@ export function UnpaidReservationsTable({ search = '', refreshKey = 0 }: UnpaidR
               </tr>
             )}
             {filtered.map((row) => (
-              <tr
-                key={row.id}
-                className="clickable-row"
-                onClick={() => navigate(`/reservations/${row.id}`)}
-              >
+              <tr key={row.key} className="clickable-row" onClick={() => navigate(row.href)}>
                 <td>
                   <strong>{row.reference}</strong>
                 </td>
@@ -109,17 +150,19 @@ export function UnpaidReservationsTable({ search = '', refreshKey = 0 }: UnpaidR
                 </td>
                 <td>
                   <PaymentBadge
-                    status={
-                      row.remaining <= 0 ? 'paid' : row.paid_amount > 0 ? 'partial' : 'unpaid'
-                    }
+                    status={row.remaining <= 0 ? 'paid' : row.paid_amount > 0 ? 'partial' : 'unpaid'}
                   />
                 </td>
                 <td>
-                  <WhatsAppButton
-                    size="sm"
-                    title={t.whatsappPayment}
-                    onSend={() => window.api.sendWhatsAppPaymentReminder(row.id)}
-                  />
+                  {row.reservationId ? (
+                    <WhatsAppButton
+                      size="sm"
+                      title={t.whatsappPayment}
+                      onSend={() => window.api.sendWhatsAppPaymentReminder(row.reservationId!)}
+                    />
+                  ) : (
+                    '—'
+                  )}
                 </td>
                 <td>
                   <span className="row-chevron">

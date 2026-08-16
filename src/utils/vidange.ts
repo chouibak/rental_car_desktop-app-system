@@ -1,4 +1,5 @@
 import type { Car, VidangeSeverity, VidangeStatus } from '../types'
+import { formatNumber } from './money'
 
 const DEFAULT_INTERVAL_KM = 10000
 const DEFAULT_INTERVAL_MONTHS = 6
@@ -144,7 +145,7 @@ export function getVidangeTrafficLevel(status: VidangeStatus): VidangeTrafficLev
 }
 
 export function formatKm(value: number, unit = 'km') {
-  return `${Math.round(value).toLocaleString('fr-FR')} ${unit}`
+  return `${formatNumber(value)} ${unit}`
 }
 
 export function formatVidangeBadgeLabel(

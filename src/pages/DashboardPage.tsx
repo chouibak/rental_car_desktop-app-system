@@ -16,11 +16,13 @@ import type { DashboardStats } from '../types'
 export default function DashboardPage() {
   const { t, money } = useLang()
   const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    window.api.getDashboardStats().then(setStats)
-  }, [])
+    window.api.getDashboardStats().then(setStats).catch(() => setError(t.loadFailed))
+  }, [t])
 
+  if (error) return <div className="empty">{error}</div>
   if (!stats) return <div className="empty">{t.loading}</div>
 
   const { charts } = stats

@@ -1,5 +1,6 @@
 import type { Notification, NotificationKind } from '../types'
 import type { Lang } from '../types'
+import { formatNumber } from './money'
 import { VIDANGE_SOON_KM } from './vidange'
 
 type Dict = Record<string, string>
@@ -54,7 +55,7 @@ export function isDocNotification(kind: NotificationKind) {
 }
 
 function vidangeKmLabel(t: Dict, km: number) {
-  const n = Math.abs(Math.round(km)).toLocaleString('fr-FR')
+  const n = formatNumber(Math.abs(km))
   return km <= 0 ? t.vidangeKmOverdue.replace('{n}', n) : t.vidangeKmRemaining.replace('{n}', n)
 }
 

@@ -11,15 +11,42 @@ import {
 import { ReservationPaymentsPanel } from '../components/ReservationPaymentsPanel'
 import { PageHeader, PaymentBadge, StatusBadge } from '../components/ui'
 import { useLang } from '../context/LangContext'
-import type { Contract, Reservation } from '../types'
+import type { Contract, Reservation, ReservationStatus } from '../types'
+import { isLiveContract } from '../utils/contracts'
+import { mapAppError } from '../utils/errors'
 import { deliveryLocationLabel } from '../utils/reservation'
+
+const RESERVATION_STATUSES: ReservationStatus[] = ['pending', 'confirmed', 'completed', 'cancelled']
+
+const RESERVATION_STATUS_TONE: Record<ReservationStatus, 'active' | 'draft' | 'closed' | 'cancelled'> = {
+  pending: 'draft',
+  confirmed: 'active',
+  completed: 'closed',
+  cancelled: 'cancelled',
+}
+
+function reservationUpdatePayload(reservation: Reservation, status: ReservationStatus) {
+  return {
+    car_id: reservation.car_id,
+    customer_id: reservation.customer_id,
+    chauffeur_id: reservation.chauffeur_id,
+    pickup_date: reservation.pickup_date,
+    return_date: reservation.return_date,
+    delivery_location: reservation.delivery_location,
+    message: reservation.message,
+    daily_rate: reservation.daily_rate,
+    deposit_amount: reservation.deposit_amount,
+    deposit_status: reservation.deposit_status,
+    status,
+  }
+}
 
 type ReservationTab = 'details' | 'contract' | 'payments'
 
-function formatDatetime(value: string) {
+function formatDatetime(value: string, locale: string) {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
-  return d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
+  return d.toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' })
 }
 
 function display(value: string | number | null | undefined) {
@@ -31,10 +58,12 @@ function display(value: string | number | null | undefined) {
 export default function ReservationDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { t, money } = useLang()
+  const { t, money, lang } = useLang()
+  const locale = lang === 'ar' ? 'ar-MA' : 'fr-FR'
   const [reservation, setReservation] = useState<Reservation | null>(null)
   const [linkedContracts, setLinkedContracts] = useState<Contract[]>([])
   const [activeTab, setActiveTab] = useState<ReservationTab>('details')
+  const [statusSaving, setStatusSaving] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -49,7 +78,11 @@ export default function ReservationDetailPage() {
     })
 
     window.api.listContracts().then((contracts) => {
-      setLinkedContracts(contracts.filter((contract) => Number(contract.reservation_id) === reservationId))
+      setLinkedContracts(
+        contracts.filter(
+          (contract) => Number(contract.reservation_id) === reservationId && isLiveContract(contract),
+        ),
+      )
     })
   }, [id, navigate])
 
@@ -68,6 +101,22 @@ export default function ReservationDetailPage() {
     }
   }
 
+  const onStatusChange = async (status: ReservationStatus) => {
+    if (!reservation || status === reservation.status || statusSaving) return
+    setStatusSaving(true)
+    try {
+      const updated = await window.api.updateReservation(
+        reservation.id,
+        reservationUpdatePayload(reservation, status),
+      )
+      if (updated) setReservation(updated)
+    } catch (err) {
+      alert(mapAppError(err, t) || t.statusUpdateFailed)
+    } finally {
+      setStatusSaving(false)
+    }
+  }
+
   if (!reservation) return <div className="empty">{t.loading}</div>
 
   const paid = reservation.paid_amount ?? 0
@@ -76,7 +125,7 @@ export default function ReservationDetailPage() {
       ? 'paid'
       : paid > 0
         ? 'partial'
-        : reservation.payment_status
+        : 'unpaid'
 
   const infoItems = [
     {
@@ -114,8 +163,8 @@ export default function ReservationDetailPage() {
         '—'
       ),
     },
-    { label: t.pickupDate, value: formatDatetime(reservation.pickup_date) },
-    { label: t.returnDateTime, value: formatDatetime(reservation.return_date) },
+    { label: t.pickupDate, value: formatDatetime(reservation.pickup_date, locale) },
+    { label: t.returnDateTime, value: formatDatetime(reservation.return_date, locale) },
     { label: t.days, value: display(reservation.days) },
     { label: t.dailyPrice, value: money(reservation.daily_rate) },
     { label: t.total, value: money(reservation.total_amount) },
@@ -165,7 +214,21 @@ export default function ReservationDetailPage() {
           </Link>
         </div>
 
-        <div className="toolbar-manage">
+        <div className="toolbar-manage reservation-header-actions">
+          <div className="contract-status-switch" role="group" aria-label={t.status}>
+            {RESERVATION_STATUSES.map((status) => (
+              <button
+                key={status}
+                type="button"
+                className={`contract-status-btn contract-status-btn--${RESERVATION_STATUS_TONE[status]}${reservation.status === status ? ' is-active' : ''}`}
+                disabled={statusSaving}
+                aria-pressed={reservation.status === status}
+                onClick={() => onStatusChange(status)}
+              >
+                {t[status]}
+              </button>
+            ))}
+          </div>
           <Link className="btn btn-edit" to={`/reservations/${reservation.id}/edit`}>
             <IconEdit size={16} />
             {t.edit}
@@ -178,7 +241,6 @@ export default function ReservationDetailPage() {
       </PageHeader>
 
       <div className="car-detail-meta">
-        <StatusBadge status={reservation.status} />
         <PaymentBadge status={paymentStatus} />
         <span className="muted-text">
           {money(paid)} / {money(reservation.total_amount)}
@@ -273,11 +335,12 @@ export default function ReservationDetailPage() {
                 <p className="muted-text">{t.contractCancelledHint}</p>
               ) : (
                 <div className="contract-action-create">
-                  <div>
+                  <div className="contract-action-create-copy">
                     <strong>{t.noContractYet}</strong>
                     <p className="muted-text">{t.contractForReservationHint}</p>
                   </div>
                   <button type="button" className="btn" onClick={onCreateContract}>
+                    <IconFile size={16} />
                     {t.createContractFromReservation}
                   </button>
                 </div>

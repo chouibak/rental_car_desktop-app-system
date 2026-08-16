@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 
 let storageRoot = ''
+/** Parent of every per-entity storage folder (cars, customers, contracts, ...). */
+let appStorageRoot = ''
 
 export const IMAGE_EXTENSIONS = [
   'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'ico',
@@ -29,8 +31,16 @@ export function isImageExtension(filePath: string) {
 }
 
 export function initStorage(userDataPath: string) {
-  storageRoot = path.join(userDataPath, 'storage', 'cars')
+  appStorageRoot = path.normalize(path.join(userDataPath, 'storage'))
+  storageRoot = path.join(appStorageRoot, 'cars')
   fs.mkdirSync(storageRoot, { recursive: true })
+}
+
+/** Guard against a renderer-supplied path pointing outside the app's own files. */
+export function isManagedFile(filePath: string) {
+  if (!appStorageRoot) return true
+  const normalized = path.normalize(filePath)
+  return normalized.startsWith(`${appStorageRoot}${path.sep}`)
 }
 
 export function getStorageRoot() {
@@ -112,12 +122,19 @@ export function fileExists(filePath: string | null | undefined) {
 }
 
 export function deleteFileIfExists(filePath: string | null | undefined) {
-  if (!filePath) return
+  if (!filePath || !isManagedFile(filePath)) return
   try {
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
   } catch {
     // ignore missing files
   }
+}
+
+/** Write through a temp file so a crash mid-write cannot leave a truncated file. */
+export function writeJsonFileAtomic(filePath: string, data: unknown) {
+  const tempPath = `${filePath}.tmp`
+  fs.writeFileSync(tempPath, JSON.stringify(data), 'utf8')
+  fs.renameSync(tempPath, filePath)
 }
 
 export function deleteCarStorage(carId: number) {

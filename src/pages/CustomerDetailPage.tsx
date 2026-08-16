@@ -71,28 +71,30 @@ export default function CustomerDetailPage() {
   const [activeTab, setActiveTab] = useState<CustomerTab>('details')
 
   useEffect(() => {
-    if (!id) return
     const customerId = Number(id)
+    if (!Number.isFinite(customerId) || customerId <= 0) {
+      navigate('/customers')
+      return
+    }
 
-    window.api.getCustomer(customerId).then((data) => {
-      if (!data) {
-        navigate('/customers')
-        return
-      }
-      setCustomer(data)
-    })
+    window.api
+      .getCustomer(customerId)
+      .then((data) => (data ? setCustomer(data) : navigate('/customers')))
+      .catch(() => navigate('/customers'))
 
     setLoadingReservations(true)
-    window.api.listReservations({ customer_id: customerId }).then((rows) => {
-      setReservations(rows)
-      setLoadingReservations(false)
-    })
+    window.api
+      .listReservations({ customer_id: customerId })
+      .then(setReservations)
+      .catch(() => setReservations([]))
+      .finally(() => setLoadingReservations(false))
 
     setLoadingContracts(true)
-    window.api.listContracts({ client_id: customerId }).then((rows) => {
-      setContracts(rows)
-      setLoadingContracts(false)
-    })
+    window.api
+      .listContracts({ client_id: customerId })
+      .then(setContracts)
+      .catch(() => setContracts([]))
+      .finally(() => setLoadingContracts(false))
   }, [id, navigate])
 
   const onOpenDocument = async (filePath: string) => {

@@ -11,9 +11,19 @@ export default function CustomersPage() {
   const navigate = useNavigate()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [q, setQ] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   const load = async () => {
-    setCustomers(await window.api.listCustomers(q || undefined))
+    setLoading(true)
+    setError('')
+    try {
+      setCustomers(await window.api.listCustomers(q || undefined))
+    } catch {
+      setError(t.loadFailed)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -69,7 +79,7 @@ export default function CustomersPage() {
               {customers.length === 0 && (
                 <tr>
                   <td colSpan={6}>
-                    <EmptyState message={t.noData} />
+                    <EmptyState message={loading ? t.loading : error || t.noData} />
                   </td>
                 </tr>
               )}

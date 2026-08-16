@@ -1,7 +1,8 @@
 import type { Database } from 'sql.js'
 import { driverSnapshotFromChauffeur } from './chauffeurs-db'
-import { agentLog } from './debug-log'
-import { CONTRACT_PAID_AMOUNT_EXPR } from './payment-sync'
+import { contractPaidExpr, syncReservationPaymentStatusForContract } from './payment-sync'
+import { reconcileContractOverpayment } from './payment-ledger'
+import { roundMoney, SQL_NOW } from './local-date'
 
 export type ContractStatus = 'draft' | 'active' | 'closed' | 'cancelled'
 
@@ -477,19 +478,23 @@ function getBaseReturnAt(
   return addDaysIso(currentReturn, -extensionDays)
 }
 
+/**
+ * Rental total before any prolongation.
+ * Derived from the live total so contract edits (extra charges, discount, rate) stay
+ * authoritative; the stored value is only a fallback when there is no rate to subtract.
+ */
 function getOriginalRentalTotal(
   contract: Pick<
     ContractRecord,
     'total_amount' | 'extension_days' | 'daily_rate' | 'daily_price' | 'original_total_amount'
   >,
 ) {
-  const stored = Number(contract.original_total_amount ?? 0)
-  if (stored > 0) return stored
   const ext = Math.max(0, Math.floor(Number(contract.extension_days ?? 0)))
   const daily = Number(contract.daily_rate ?? contract.daily_price ?? 0)
   const total = Number(contract.total_amount ?? 0)
   if (ext <= 0) return total
-  return Math.max(0, total - ext * daily)
+  if (daily <= 0) return Number(contract.original_total_amount ?? 0) || total
+  return Math.max(0, roundMoney(total - ext * daily))
 }
 
 function computeExtensionState(
@@ -564,7 +569,8 @@ function syncLinkedReservationDates(
   )
 }
 
-function assertExtensionAvailable(
+/** The car must be free for this contract's window, ignoring the contract's own reservation. */
+function assertCarFreeForContract(
   helpers: DbHelpers,
   contract: ContractRecord,
   newReturnAt: string,
@@ -574,7 +580,7 @@ function assertExtensionAvailable(
   const end = datePart(newReturnAt)
   const overlapContract = helpers.queryOne(
     `SELECT id FROM contracts
-     WHERE car_id = ? AND deleted_at IS NULL AND status = 'active' AND id != ?
+     WHERE car_id = ? AND deleted_at IS NULL AND status IN ('active', 'draft') AND id != ?
        AND NOT (date(COALESCE(NULLIF(return_at,''), end_date)) < date(?)
             OR date(COALESCE(NULLIF(departure_at,''), start_date)) > date(?))
      LIMIT 1`,
@@ -599,16 +605,28 @@ function normalizeStatus(status?: string): ContractStatus {
   return 'active'
 }
 
-/** Map reservation delivery_location → contract departure_place text. */
+/** Map reservation delivery_location → contract departure_place text (French, PDF-safe). */
 function departurePlaceFromDeliveryLocation(value: unknown): string {
   const raw = String(value ?? '').trim()
   if (!raw) return ''
+  const folded = raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/['’]/g, "'")
   const labels: Record<string, string> = {
     agency: "À l'agence",
     airport: 'Aéroport',
     hotel: 'Hôtel',
+    "a l'agence": "À l'agence",
+    agence: "À l'agence",
+    aeroport: 'Aéroport',
+    'في الوكالة': "À l'agence",
+    الوكالة: "À l'agence",
+    المطار: 'Aéroport',
+    الفندق: 'Hôtel',
   }
-  return labels[raw] ?? raw
+  return labels[raw] ?? labels[folded] ?? raw
 }
 
 function nextNumber(helpers: DbHelpers) {
@@ -624,6 +642,17 @@ function nextNumber(helpers: DbHelpers) {
   const last = row?.n ? Number(row.n.slice(prefix.length)) : 0
   const next = (Number.isFinite(last) ? last : 0) + 1
   return `${prefix}${String(next).padStart(4, '0')}`
+}
+
+/** A cancelled contract no longer holds the reservation, so a new one may be issued. */
+function hasLiveContract(helpers: DbHelpers, reservationId: number) {
+  return Boolean(
+    helpers.queryOne(
+      `SELECT id FROM contracts
+       WHERE reservation_id = ? AND deleted_at IS NULL AND status != 'cancelled'`,
+      [reservationId],
+    ),
+  )
 }
 
 function driverSnapshotFromCustomer(customer: Record<string, string>) {
@@ -725,11 +754,11 @@ function normalizeInput(data: ContractInput, existing?: ContractRecord) {
     vehicle_model: data.vehicle_model ?? existing?.vehicle_model ?? '',
     vehicle_plate: data.vehicle_plate ?? existing?.vehicle_plate ?? '',
     departure_at,
-    departure_place: data.departure_place ?? existing?.departure_place ?? '',
+    departure_place: departurePlaceFromDeliveryLocation(data.departure_place ?? existing?.departure_place ?? ''),
     departure_mileage: Number(data.departure_mileage ?? existing?.departure_mileage ?? 0),
     departure_fuel_level: data.departure_fuel_level ?? existing?.departure_fuel_level ?? '',
     return_at,
-    return_place: data.return_place ?? existing?.return_place ?? '',
+    return_place: departurePlaceFromDeliveryLocation(data.return_place ?? existing?.return_place ?? ''),
     return_mileage: Number(data.return_mileage ?? existing?.return_mileage ?? 0),
     return_fuel_level: data.return_fuel_level ?? existing?.return_fuel_level ?? '',
     billed_days,
@@ -948,7 +977,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
       cu.phone as client_phone,
       ca.brand, ca.model, ca.plate_number,
       r.reference as reservation_reference,
-      ${CONTRACT_PAID_AMOUNT_EXPR} as paid_amount
+      ${contractPaidExpr()} as paid_amount
     FROM contracts c
     LEFT JOIN customers cu ON cu.id = c.client_id
     LEFT JOIN cars ca ON ca.id = c.car_id
@@ -984,7 +1013,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
         params.push(like, like, like, like)
       }
       if (filters?.overdue) {
-        sql += ` AND c.status = 'active' AND datetime(COALESCE(NULLIF(c.return_at,''), c.end_date)) < datetime('now')`
+        sql += ` AND c.status = 'active' AND datetime(COALESCE(NULLIF(c.return_at,''), c.end_date)) < ${SQL_NOW}`
       }
 
       sql += ' ORDER BY c.id DESC'
@@ -992,7 +1021,10 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
     },
 
     getContract(id: number) {
-      const contract = helpers.queryOne<ContractListItem>(`${listSql} WHERE c.id = ?`, [id])
+      const contract = helpers.queryOne<ContractListItem>(
+        `${listSql} WHERE c.id = ? AND c.deleted_at IS NULL`,
+        [id],
+      )
       if (!contract) return null
 
       const contractPayments = helpers.queryAll<{
@@ -1000,39 +1032,55 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
         contract_id: number
         amount: number
         method: string
+        status: string
         paid_at: string
         note: string
-      }>('SELECT * FROM payments WHERE contract_id = ? ORDER BY paid_at DESC, id DESC', [id])
+      }>(
+        `SELECT * FROM payments WHERE contract_id = ?
+         ORDER BY datetime(replace(substr(COALESCE(paid_at, created_at, ''), 1, 19), 'T', ' ')) DESC, id DESC`,
+        [id],
+      )
 
       const reservationPayments = contract.reservation_id
         ? helpers.queryAll<{
             id: number
+            reservation_id: number
             amount: number
             method: string
+            status: string
             paid_at: string
             notes: string
             reference: string
+            created_at?: string
           }>(
-            `SELECT id, amount, method, paid_at, notes, reference
+            `SELECT id, reservation_id, amount, method, status, paid_at, notes, reference, created_at
              FROM reservation_payments
              WHERE reservation_id = ? AND type = 'rental' AND status = 'completed'
-             ORDER BY paid_at DESC, id DESC`,
+             ORDER BY datetime(replace(substr(COALESCE(paid_at, created_at, ''), 1, 19), 'T', ' ')) DESC, id DESC`,
             [contract.reservation_id],
           )
         : []
 
+      // Real row ids on both sides: the detail page edits/deletes them through their own ledger.
       const payments = [
         ...contractPayments.map((payment) => ({ ...payment, source: 'contract' as const })),
         ...reservationPayments.map((payment) => ({
-          id: -payment.id,
+          id: payment.id,
           contract_id: id,
+          reservation_id: payment.reservation_id,
           amount: payment.amount,
           method: payment.method,
+          status: payment.status,
           paid_at: payment.paid_at,
           note: payment.notes || payment.reference || '',
+          reference: payment.reference,
           source: 'reservation' as const,
         })),
-      ].sort((a, b) => new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime())
+      ].sort((a, b) => {
+        const paidDiff = new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime()
+        if (Number.isFinite(paidDiff) && paidDiff !== 0) return paidDiff
+        return (b.id || 0) - (a.id || 0)
+      })
 
       const reservationContractCount = contract.reservation_id
         ? helpers.queryOne<{ c: number }>(
@@ -1074,12 +1122,8 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
         throw new Error('CAR_NOT_AVAILABLE')
       }
 
-      if (normalized.reservation_id) {
-        const existing = helpers.queryOne(
-          `SELECT id FROM contracts WHERE reservation_id = ? AND deleted_at IS NULL`,
-          [normalized.reservation_id],
-        )
-        if (existing) throw new Error('CONTRACT_ALREADY_EXISTS')
+      if (normalized.reservation_id && hasLiveContract(helpers, normalized.reservation_id)) {
+        throw new Error('CONTRACT_ALREADY_EXISTS')
       }
 
       const t = helpers.now()
@@ -1233,11 +1277,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
       )
       if (!reservation) throw new Error('RESERVATION_NOT_FOUND')
 
-      const existing = helpers.queryOne(
-        `SELECT id FROM contracts WHERE reservation_id = ? AND deleted_at IS NULL`,
-        [reservationId],
-      )
-      if (existing) throw new Error('CONTRACT_ALREADY_EXISTS')
+      if (hasLiveContract(helpers, reservationId)) throw new Error('CONTRACT_ALREADY_EXISTS')
 
       const customer = helpers.queryOne<Record<string, string>>(
         'SELECT * FROM customers WHERE id = ?',
@@ -1329,7 +1369,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
 
       if (normalized.reservation_id) {
         const duplicate = helpers.queryOne(
-          `SELECT id FROM contracts WHERE reservation_id = ? AND deleted_at IS NULL AND id != ?`,
+          `SELECT id FROM contracts WHERE reservation_id = ? AND deleted_at IS NULL AND status != 'cancelled' AND id != ?`,
           [normalized.reservation_id, id],
         )
         if (duplicate) throw new Error('CONTRACT_ALREADY_EXISTS')
@@ -1488,7 +1528,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
       if (existing.reservation_id) {
         const other = helpers.queryOne(
           `SELECT id FROM contracts
-           WHERE reservation_id = ? AND deleted_at IS NULL AND id != ?`,
+           WHERE reservation_id = ? AND deleted_at IS NULL AND status != 'cancelled' AND id != ?`,
           [existing.reservation_id, id],
         )
         if (other) throw new Error('CONTRACT_ALREADY_EXISTS')
@@ -1501,43 +1541,9 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
       const existing = helpers.queryOne<ContractRecord>('SELECT * FROM contracts WHERE id = ?', [id])
       if (!existing) throw new Error('CONTRACT_NOT_FOUND')
       if (existing.status !== 'draft') throw new Error('INVALID_CONTRACT_STATUS')
-      // #region agent log
-      {
-        const overlap = existing.car_id
-          ? helpers.queryOne(
-              `SELECT id FROM (
-                 SELECT id FROM contracts
-                 WHERE car_id = ? AND status = 'active' AND deleted_at IS NULL AND id != ?
-                   AND NOT (end_date < ? OR start_date > ?)
-                 UNION ALL
-                 SELECT id FROM reservations
-                 WHERE car_id = ? AND status IN ('pending', 'confirmed')
-                   AND (? IS NULL OR id != ?)
-                   AND NOT (return_date <= ? OR pickup_date >= ?)
-               ) LIMIT 1`,
-              [
-                existing.car_id,
-                id,
-                existing.start_date,
-                existing.end_date,
-                existing.car_id,
-                existing.reservation_id,
-                existing.reservation_id ?? 0,
-                existing.start_date,
-                existing.end_date,
-              ],
-            )
-          : null
-        agentLog('A2', 'contracts-db.ts:markDelivered', 'Deliver draft without rentable gate', {
-          contractId: id,
-          carId: existing.car_id,
-          reservationId: existing.reservation_id,
-          start: existing.start_date,
-          end: existing.end_date,
-          wouldOverlap: Boolean(overlap),
-        })
-      }
-      // #endregion
+      // Activating the draft puts the car on the road: refuse if it is already booked out.
+      assertCarFreeForContract(helpers, existing, existing.return_at || existing.end_date)
+
       const t = helpers.now()
       const departureDamagesJson =
         data?.departure_damages !== undefined
@@ -1758,7 +1764,10 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
       if (!existing) throw new Error('CONTRACT_NOT_FOUND')
       if (existing.status === 'closed') throw new Error('INVALID_CONTRACT_STATUS')
       helpers.run(`UPDATE contracts SET status = 'cancelled', updated_at = ? WHERE id = ?`, [helpers.now(), id])
-      finalizeLinkedReservation(helpers, existing.reservation_id, 'cancelled')
+      // A draft was never delivered: the reservation stays open so another contract can be issued.
+      if (existing.status === 'active') {
+        finalizeLinkedReservation(helpers, existing.reservation_id, 'cancelled')
+      }
       return this.getContract(id)
     },
 
@@ -1808,35 +1817,31 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
 
       const previousDays = Math.max(0, Math.floor(Number(existing.extension_days ?? 0)))
       const computed = computeExtensionState(existing, extension_days)
-      const { original_return_at, original_total_amount, newReturnAt, billed_days, total_amount, extension_until } =
-        computed
+      const { original_return_at, original_total_amount, newReturnAt, billed_days, total_amount, extension_until } = computed
 
       if (
         new Date(newReturnAt).getTime() === new Date(existing.return_at || existing.end_date || '').getTime() &&
         extension_days === previousDays &&
         !data.note?.trim()
       ) {
+        // Extension unchanged, but still claw overpay left behind by older builds / untagged payments.
+        reconcileContractOverpayment(helpers, id)
         return this.getContract(id)
       }
 
       // Lengthening must stay free of overlaps; shortening is always checked against the new window.
-      assertExtensionAvailable(helpers, existing, newReturnAt)
+      assertCarFreeForContract(helpers, existing, newReturnAt)
 
       const userNote = data.note?.trim()
-      let auditLine = ''
-      if (extension_days === 0 && previousDays > 0) {
-        auditLine = `Prolongation annulée (était +${previousDays}j)`
-      } else if (extension_days !== previousDays) {
-        auditLine = previousDays > 0
-          ? `Prolongation modifiée: ${previousDays}j → ${extension_days}j jusqu'au ${extension_until || datePart(newReturnAt)}`
-          : `Prolongation +${extension_days}j jusqu'au ${extension_until}`
-      }
-      if (userNote) {
-        auditLine = auditLine ? `${auditLine}: ${userNote}` : userNote
-      }
-      const notes = auditLine
-        ? [existing.notes?.trim(), auditLine].filter(Boolean).join('\n')
-        : existing.notes
+      const cleanedNotes = String(existing.notes ?? '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line && !/^Prolongation\b/i.test(line))
+        .join('\n')
+        .trim()
+      const notes = userNote
+        ? [cleanedNotes, userNote].filter(Boolean).join('\n')
+        : cleanedNotes
 
       helpers.run(
         `UPDATE contracts SET
@@ -1854,11 +1859,17 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
           extension_days,
           original_return_at,
           original_total_amount,
-          notes ?? '',
+          notes,
           helpers.now(),
           id,
         ],
       )
+
+      // When removing/reducing prolongation, only give back cash that is now in excess of the new
+      // total. Blindly removing `costReduction` would wrongly eat into money owed for the base rental
+      // (or an already-underpaid extension) whenever the contract wasn't fully paid to begin with.
+      // Extension-tagged payments are still clawed back first (see clawBackContractPayments row order).
+      reconcileContractOverpayment(helpers, id)
 
       syncLinkedReservationDates(helpers, existing.reservation_id, {
         pickup_date: existing.departure_at || existing.start_date,
@@ -1867,6 +1878,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
         daily_rate: Number(existing.daily_rate ?? existing.daily_price ?? 0),
         total_amount,
       })
+      syncReservationPaymentStatusForContract(helpers, id)
 
       const updated = this.getContract(id)
       if (!updated) throw new Error('CONTRACT_UPDATE_FAILED')
@@ -1877,12 +1889,18 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
     },
 
     removeContractExtension(id: number) {
-      return this.setContractExtension(id, { extension_days: 0 })
+      const updated = this.setContractExtension(id, { extension_days: 0 })
+      // If extension was already 0 (stuck overpay), setContractExtension still reconciles via early path.
+      reconcileContractOverpayment(helpers, id)
+      return this.getContract(id) ?? updated
     },
 
     getContractStats() {
       const active = helpers.queryOne<{ c: number }>(
         `SELECT COUNT(*) as c FROM contracts WHERE status = 'active' AND deleted_at IS NULL`,
+      )
+      const draft = helpers.queryOne<{ c: number }>(
+        `SELECT COUNT(*) as c FROM contracts WHERE status = 'draft' AND deleted_at IS NULL`,
       )
       const total = helpers.queryOne<{ c: number }>(
         `SELECT COUNT(*) as c FROM contracts WHERE deleted_at IS NULL`,
@@ -1893,13 +1911,13 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
            COALESCE(SUM(CASE WHEN remaining > 0 THEN 1 ELSE 0 END), 0) as count
          FROM (
            SELECT
-             MAX(0, COALESCE(c.total_amount, 0) - ${CONTRACT_PAID_AMOUNT_EXPR}) as remaining
+             MAX(0, COALESCE(c.total_amount, 0) - ${contractPaidExpr()}) as remaining
            FROM contracts c
            WHERE c.deleted_at IS NULL AND c.status != 'cancelled'
          )`,
       )
       const paid = helpers.queryOne<{ amount: number }>(
-        `SELECT COALESCE(SUM(${CONTRACT_PAID_AMOUNT_EXPR}), 0) as amount
+        `SELECT COALESCE(SUM(${contractPaidExpr()}), 0) as amount
          FROM contracts c
          WHERE c.deleted_at IS NULL AND c.status != 'cancelled'`,
       )
@@ -1910,7 +1928,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
       )
       return {
         active: active?.c ?? 0,
-        draft: 0,
+        draft: draft?.c ?? 0,
         total: total?.c ?? 0,
         unpaid_amount: Number(unpaid?.amount ?? 0),
         unpaid_count: Number(unpaid?.count ?? 0),
@@ -1935,10 +1953,13 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
       const vatRate = vatApplies ? Number(contract.vat_rate ?? 0) : 0
       const ht = vatRate > 0 ? ttc / (1 + vatRate / 100) : ttc
       const vat = ttc - ht
-      const lines: Array<{ label: string; amount: number }> = [
-        { label: 'Location', amount: baseLocation },
+      // `days` drives the Qté / P.U. columns of the invoice: keep it with the amount it bills.
+      const lines: Array<{ label: string; amount: number; days?: number }> = [
+        { label: 'Location', amount: baseLocation, days: baseDays },
       ]
-      if (extensionDays > 0) lines.push({ label: 'Prolongation', amount: extensionCost })
+      if (extensionDays > 0) {
+        lines.push({ label: 'Prolongation', amount: extensionCost, days: extensionDays })
+      }
       if (discount > 0) lines.push({ label: 'Remise', amount: -discount })
       if (extras > 0) lines.push({ label: 'Frais supplémentaires', amount: extras })
       return {

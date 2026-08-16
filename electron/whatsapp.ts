@@ -26,7 +26,13 @@ function formatDate(value: string, lang: string) {
 }
 
 function formatMoney(amount: number) {
-  return `${Number(amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DH`
+  const value = Number(amount || 0)
+  const negative = value < 0
+  const abs = Math.abs(value)
+  const fixed = abs.toFixed(2)
+  const [intPart, decPart] = fixed.split('.')
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return `DH ${negative ? '-' : ''}${grouped}.${decPart}`
 }
 
 function openWhatsApp(phone: string, message: string): WhatsAppResult {

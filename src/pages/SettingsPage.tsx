@@ -155,6 +155,8 @@ export default function SettingsPage() {
   const [form, setForm] = useState<SettingsForm>(EMPTY_FORM)
   const [logoPreview, setLogoPreview] = useState('')
   const [conditionsPreview, setConditionsPreview] = useState('')
+  const [loaded, setLoaded] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
 
@@ -173,7 +175,8 @@ export default function SettingsPage() {
   }, [username])
 
   useEffect(() => {
-    window.api.getSettings().then(async (s) => {
+    const loadSettings = async () => {
+      const s = await window.api.getSettings()
       setForm({
         company_name: s.company_name || '',
         company_logo: s.company_logo || '',
@@ -213,8 +216,13 @@ export default function SettingsPage() {
       } else {
         setConditionsPreview('')
       }
-    })
-  }, [])
+    }
+
+    // Saving before this resolves would push the empty defaults over the stored settings.
+    loadSettings()
+      .then(() => setLoaded(true))
+      .catch(() => setError(t.loadFailed))
+  }, [t])
 
 
 
@@ -394,6 +402,8 @@ export default function SettingsPage() {
 
     setError('')
 
+    if (!loaded || saving) return
+
     if (!form.company_phone.trim() || !form.company_whatsapp.trim() || !form.company_email.trim()) {
 
       setError(t.requiredField)
@@ -402,11 +412,28 @@ export default function SettingsPage() {
 
     }
 
-    await window.api.saveSettings({ ...form, language: lang })
-    window.dispatchEvent(new Event('agency-settings-updated'))
-    setSaved(true)
+    const returnDays = Number(form.notification_return_days)
+    const docDays = Number(form.notification_doc_days)
+    if (!Number.isInteger(returnDays) || returnDays < 0 || returnDays > 30) {
+      setError(t.notificationSettingsHint)
+      return
+    }
+    if (!Number.isInteger(docDays) || docDays < 0 || docDays > 90) {
+      setError(t.notificationSettingsHint)
+      return
+    }
 
-    setTimeout(() => setSaved(false), 2000)
+    setSaving(true)
+    try {
+      await window.api.saveSettings({ ...form, language: lang })
+      window.dispatchEvent(new Event('agency-settings-updated'))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch {
+      setError(t.saveFailed)
+    } finally {
+      setSaving(false)
+    }
 
   }
 
@@ -858,9 +885,9 @@ export default function SettingsPage() {
 
           <div className="panel-body" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
 
-            <button className="btn" type="submit">
+            <button className="btn" type="submit" disabled={!loaded || saving}>
 
-              {t.save}
+              {saving ? t.loading : t.save}
 
             </button>
 

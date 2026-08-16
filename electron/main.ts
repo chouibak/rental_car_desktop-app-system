@@ -18,6 +18,8 @@ import {
   pickCustomerDocument,
 } from './customers-files'
 import { generateContractPdf, openContractPdf, pickContractDamagePhoto, pickContractDamageVideo } from './contract-files'
+import { generateRevenuePdf } from './revenue-pdf'
+import { generateExpensesPdf } from './expenses-pdf'
 import {
   deleteExpenseFile,
   exportExpensesExcel,
@@ -298,6 +300,7 @@ function registerIpc() {
   ipcMain.handle('expenses:getFileUrl', (_e, filePath: string) => getExpenseFileUrl(filePath))
   ipcMain.handle('expenses:openFile', (_e, filePath: string) => openExpenseFile(filePath))
   ipcMain.handle('expenses:exportExcel', (_e, filters) => exportExpensesExcel(filters))
+  ipcMain.handle('expenses:exportPdf', (_e, year: number, month: number) => generateExpensesPdf(year, month))
 
   ipcMain.handle('vidange:list', (_e, carId: number) => api.listVidanges(carId))
   ipcMain.handle('vidange:status', (_e, carId: number) => api.getVidangeStatus(carId))
@@ -320,6 +323,7 @@ function registerIpc() {
   ipcMain.handle('chauffeurs:openFile', (_e, filePath: string) => openChauffeurFile(filePath))
 
   ipcMain.handle('revenue:stats', () => api.getRevenueStats())
+  ipcMain.handle('revenue:exportPdf', (_e, year: number, month: number) => generateRevenuePdf(year, month))
 
   ipcMain.handle('notifications:list', () => api.getNotifications())
   ipcMain.handle('notifications:counts', () => api.getNotificationCounts())

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { fileBasename } from '../utils/file'
+import { mapAppError } from '../utils/errors'
 import type { Chauffeur } from '../types'
 
 type DocKey = 'cin' | 'passport' | 'license'
@@ -66,9 +67,10 @@ export default function ChauffeurFormPage() {
         passport_pdf_path: fileBasename(chauffeur.passport_pdf_path),
         license_pdf_path: fileBasename(chauffeur.license_pdf_path),
       })
-      setLoading(false)
     })
-  }, [isEdit, chauffeurId, navigate])
+      .catch(() => setError(t.loadFailed))
+      .finally(() => setLoading(false))
+  }, [isEdit, chauffeurId, navigate, t])
 
   const docMeta = useMemo(
     () =>
@@ -86,7 +88,8 @@ export default function ChauffeurFormPage() {
     if (!picked) return
     const pathKey = `${docKey}_pdf_path` as keyof Chauffeur
     const oldPath = form[pathKey] as string
-    if (oldPath && oldPath !== picked.path) await window.api.deleteChauffeurFile(oldPath)
+    // On a saved chauffeur the main process removes the replaced file once the row is updated.
+    if (!isEdit && oldPath && oldPath !== picked.path) await window.api.deleteChauffeurFile(oldPath)
 
     const nextForm = { ...form, [pathKey]: picked.path }
     setForm(nextForm)
@@ -117,12 +120,13 @@ export default function ChauffeurFormPage() {
   const onRemoveDocument = async (docKey: DocKey) => {
     const pathKey = `${docKey}_pdf_path` as keyof Chauffeur
     const oldPath = form[pathKey] as string
-    if (oldPath) await window.api.deleteChauffeurFile(oldPath)
+    const previousForm = form
     const nextForm = { ...form, [pathKey]: '' }
     setForm(nextForm)
     setDocFileNames((names) => ({ ...names, [pathKey]: '' }))
 
     if (isEdit && chauffeurId && oldPath) {
+      // Delete the file only through the update, so a failed save keeps the document.
       try {
         await window.api.updateChauffeur(chauffeurId, {
           ...nextForm,
@@ -130,9 +134,14 @@ export default function ChauffeurFormPage() {
           is_active: Boolean(nextForm.is_active),
         })
       } catch {
+        setForm(previousForm)
+        setDocFileNames((names) => ({ ...names, [pathKey]: fileBasename(oldPath) }))
         setError(t.cannotSaveDocument)
       }
+      return
     }
+
+    if (oldPath) await window.api.deleteChauffeurFile(oldPath)
   }
 
   const onOpenDocument = async (filePath: string) => {
@@ -159,7 +168,7 @@ export default function ChauffeurFormPage() {
       else await window.api.createChauffeur(payload)
       navigate('/chauffeurs')
     } catch (err) {
-      setError(String(err))
+      setError(mapAppError(err, t))
     } finally {
       setSaving(false)
     }

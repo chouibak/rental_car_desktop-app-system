@@ -1,3 +1,5 @@
+import { SQL_NOW } from './local-date'
+
 /** Cars currently out: status louee, enriched from contract (active/draft) or reservation. */
 export const CARS_IN_USE_SQL = `
   SELECT
@@ -13,7 +15,7 @@ export const CARS_IN_USE_SQL = `
       (SELECT cu.name FROM reservations rs
        JOIN customers cu ON cu.id = rs.customer_id
        WHERE rs.car_id = ca.id AND rs.status IN ('pending', 'confirmed')
-         AND datetime(rs.return_date) > datetime('now')
+         AND datetime(rs.return_date) > ${SQL_NOW}
        ORDER BY rs.id DESC LIMIT 1),
       ''
     ) as client_name,
@@ -23,7 +25,7 @@ export const CARS_IN_USE_SQL = `
        ORDER BY CASE ct.status WHEN 'active' THEN 0 ELSE 1 END, ct.id DESC LIMIT 1),
       (SELECT rs.return_date FROM reservations rs
        WHERE rs.car_id = ca.id AND rs.status IN ('pending', 'confirmed')
-         AND datetime(rs.return_date) > datetime('now')
+         AND datetime(rs.return_date) > ${SQL_NOW}
        ORDER BY rs.id DESC LIMIT 1),
       ''
     ) as return_at,
@@ -38,15 +40,15 @@ export const CARS_IN_USE_SQL = `
      ORDER BY CASE ct.status WHEN 'active' THEN 0 ELSE 1 END, ct.id DESC LIMIT 1) as contract_status,
     (SELECT rs.id FROM reservations rs
      WHERE rs.car_id = ca.id AND rs.status IN ('pending', 'confirmed')
-       AND datetime(rs.return_date) > datetime('now')
+       AND datetime(rs.return_date) > ${SQL_NOW}
      ORDER BY rs.id DESC LIMIT 1) as reservation_id,
     (SELECT rs.reference FROM reservations rs
      WHERE rs.car_id = ca.id AND rs.status IN ('pending', 'confirmed')
-       AND datetime(rs.return_date) > datetime('now')
+       AND datetime(rs.return_date) > ${SQL_NOW}
      ORDER BY rs.id DESC LIMIT 1) as reservation_reference,
     (SELECT rs.status FROM reservations rs
      WHERE rs.car_id = ca.id AND rs.status IN ('pending', 'confirmed')
-       AND datetime(rs.return_date) > datetime('now')
+       AND datetime(rs.return_date) > ${SQL_NOW}
      ORDER BY rs.id DESC LIMIT 1) as reservation_status
   FROM cars ca
   WHERE ca.status = 'louee'
@@ -65,7 +67,7 @@ export const UPCOMING_RETURNS_SQL = `
       ca.plate_number as plate_number,
       COALESCE(NULLIF(c.return_at, ''), c.end_date) as return_at,
       c.status as status,
-      CASE WHEN datetime(COALESCE(NULLIF(c.return_at, ''), c.end_date)) < datetime('now') THEN 1 ELSE 0 END as is_overdue,
+      CASE WHEN datetime(COALESCE(NULLIF(c.return_at, ''), c.end_date)) < ${SQL_NOW} THEN 1 ELSE 0 END as is_overdue,
       c.id as contract_id,
       NULL as reservation_id,
       ca.id as car_id
@@ -74,7 +76,7 @@ export const UPCOMING_RETURNS_SQL = `
     JOIN cars ca ON ca.id = c.car_id
     WHERE c.deleted_at IS NULL
       AND c.status IN ('active', 'draft')
-      AND date(COALESCE(NULLIF(c.return_at, ''), c.end_date)) <= date('now', '+7 days')
+      AND date(COALESCE(NULLIF(c.return_at, ''), c.end_date)) <= date('now', 'localtime', '+7 days')
 
     UNION ALL
 
@@ -87,7 +89,7 @@ export const UPCOMING_RETURNS_SQL = `
       ca.plate_number as plate_number,
       r.return_date as return_at,
       r.status as status,
-      CASE WHEN datetime(r.return_date) < datetime('now') THEN 1 ELSE 0 END as is_overdue,
+      CASE WHEN datetime(r.return_date) < ${SQL_NOW} THEN 1 ELSE 0 END as is_overdue,
       NULL as contract_id,
       r.id as reservation_id,
       ca.id as car_id
@@ -95,7 +97,7 @@ export const UPCOMING_RETURNS_SQL = `
     JOIN customers cu ON cu.id = r.customer_id
     JOIN cars ca ON ca.id = r.car_id
     WHERE r.status IN ('pending', 'confirmed')
-      AND date(r.return_date) <= date('now', '+7 days')
+      AND date(r.return_date) <= date('now', 'localtime', '+7 days')
       AND NOT EXISTS (
         SELECT 1 FROM contracts c2
         WHERE c2.reservation_id = r.id AND c2.deleted_at IS NULL
@@ -113,7 +115,7 @@ export const RENTALS_IN_PROGRESS_COUNT_SQL = `
     +
     (SELECT COUNT(*) FROM reservations r
      WHERE r.status IN ('pending', 'confirmed')
-       AND datetime(r.return_date) > datetime('now')
+       AND datetime(r.return_date) > ${SQL_NOW}
        AND NOT EXISTS (
          SELECT 1 FROM contracts c
          WHERE c.reservation_id = r.id AND c.deleted_at IS NULL AND c.status = 'active'
@@ -125,16 +127,16 @@ export const OVERDUE_RENTALS_COUNT_SQL = `
   SELECT (
     (SELECT COUNT(*) FROM contracts
      WHERE deleted_at IS NULL AND status IN ('active', 'draft')
-       AND datetime(COALESCE(NULLIF(return_at, ''), end_date)) < datetime('now'))
+       AND datetime(COALESCE(NULLIF(return_at, ''), end_date)) < ${SQL_NOW})
     +
     (SELECT COUNT(*) FROM reservations r
      WHERE r.status IN ('pending', 'confirmed')
-       AND datetime(r.return_date) < datetime('now')
+       AND datetime(r.return_date) < ${SQL_NOW}
        AND NOT EXISTS (
          SELECT 1 FROM contracts c
          WHERE c.reservation_id = r.id AND c.deleted_at IS NULL
            AND c.status IN ('active', 'draft')
-           AND datetime(COALESCE(NULLIF(c.return_at, ''), c.end_date)) < datetime('now')
+           AND datetime(COALESCE(NULLIF(c.return_at, ''), c.end_date)) < ${SQL_NOW}
        ))
   ) as c
 `

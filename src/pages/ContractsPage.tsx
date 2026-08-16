@@ -3,8 +3,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import { IconEdit, IconPlus, IconSearch, IconTrash } from '../components/icons'
 import { EmptyState, PageHeader, StatCard, StatusBadge } from '../components/ui'
 import { useLang } from '../context/LangContext'
-import type { Contract, ContractStats, Reservation } from '../types'
-import { formatContractDatetime } from '../utils/contracts'
+import type { Contract, ContractStats, ContractStatus, Reservation } from '../types'
+import { formatContractDatetime, isLiveContract } from '../utils/contracts'
 
 export default function ContractsPage() {
   const { t, money } = useLang()
@@ -13,7 +13,7 @@ export default function ContractsPage() {
   const [stats, setStats] = useState<ContractStats | null>(null)
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [q, setQ] = useState('')
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState<ContractStatus | ''>('')
   const [reservationModalOpen, setReservationModalOpen] = useState(false)
   const [selectedReservationId, setSelectedReservationId] = useState<number | ''>('')
   const [error, setError] = useState('')
@@ -36,7 +36,9 @@ export default function ContractsPage() {
     ])
 
     const usedReservationIds = new Set(
-      existingContracts.map((contract) => contract.reservation_id).filter(Boolean) as number[],
+      existingContracts
+        .filter((contract) => isLiveContract(contract) && contract.reservation_id)
+        .map((contract) => contract.reservation_id) as number[],
     )
 
     setContracts(rows)
@@ -78,7 +80,11 @@ export default function ContractsPage() {
               onChange={(e) => setQ(e.target.value)}
             />
           </div>
-          <select className="select select-sm" value={status} onChange={(e) => setStatus(e.target.value)}>
+          <select
+            className="select select-sm"
+            value={status}
+            onChange={(e) => setStatus(e.target.value as ContractStatus | '')}
+          >
             <option value="">{t.all}</option>
             <option value="draft">{t.draft}</option>
             <option value="active">{t.active}</option>

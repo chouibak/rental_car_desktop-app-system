@@ -5,6 +5,8 @@ import { PageHeader } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import type { Dict } from '../i18n'
 import type { Car, Expense, ExpenseCategory, ExpensePaymentMethod } from '../types'
+import { todayYmd } from '../utils/calendar'
+import { mapAppError } from '../utils/errors'
 
 const CATEGORIES: ExpenseCategory[] = [
   'fuel',
@@ -36,7 +38,7 @@ const emptyForm = (): Partial<Expense> => ({
   title: '',
   category: 'other',
   amount: 0,
-  expense_date: new Date().toISOString().slice(0, 10),
+  expense_date: todayYmd(),
   payment_method: 'cash',
   receipt_path: '',
   notes: '',
@@ -138,7 +140,7 @@ export default function ExpenseFormPage() {
       if (form.car_id) navigate(`/cars/${form.car_id}`)
       else navigate('/expenses')
     } catch (err) {
-      setError(String(err))
+      setError(mapAppError(err, t))
     } finally {
       setSaving(false)
     }

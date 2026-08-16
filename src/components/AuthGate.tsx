@@ -21,7 +21,10 @@ export function AuthGate({ children }: Props) {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    window.api.getAuthSession().then(setSession)
+    window.api
+      .getAuthSession()
+      .then(setSession)
+      .catch(() => setSession({ authenticated: false, username: null, remember: false }))
   }, [])
 
   if (!session) {

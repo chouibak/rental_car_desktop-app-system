@@ -23,13 +23,15 @@ export default function NotificationsPage() {
   const [items, setItems] = useState<Notification[]>([])
   const [filter, setFilter] = useState<Filter>('all')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
 
   useEffect(() => {
-    window.api.getNotifications().then((list) => {
-      setItems(list)
-      setLoading(false)
-    })
-  }, [])
+    window.api
+      .getNotifications()
+      .then(setItems)
+      .catch(() => setError(t.loadFailed))
+      .finally(() => setLoading(false))
+  }, [t])
 
   const filtered = useMemo(() => {
     if (filter === 'returns') return items.filter((item) => isReturnNotification(item.kind))
@@ -48,6 +50,7 @@ export default function NotificationsPage() {
   )
 
   if (loading) return <div className="empty">{t.loading}</div>
+  if (error) return <div className="empty">{error}</div>
 
   return (
     <div className="notifications-page">

@@ -381,15 +381,12 @@ export function createVidangeApi(
       }
 
       if (expense_id) {
-        try {
-          updateLinkedExpense?.(expense_id, {
-            amount: cost,
-            expense_date: performed_at,
-            notes: notes || undefined,
-          })
-        } catch {
-          // keep link even if expense update fails
-        }
+        if (!updateLinkedExpense) throw new Error('EXPENSE_API_UNAVAILABLE')
+        updateLinkedExpense(expense_id, {
+          amount: cost,
+          expense_date: performed_at,
+          notes: notes || undefined,
+        })
       } else {
         if (!createLinkedExpense) throw new Error('EXPENSE_API_UNAVAILABLE')
         const car = helpers.queryOne<{ name: string; plate_number: string }>(

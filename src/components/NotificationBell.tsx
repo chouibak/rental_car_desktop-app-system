@@ -27,12 +27,17 @@ export function NotificationBell({ tone = 'default' }: { tone?: 'default' | 'sid
   const panelRef = useRef<HTMLDivElement>(null)
 
   const refresh = async () => {
-    const [nextCounts, nextItems] = await Promise.all([
-      window.api.getNotificationCounts(),
-      window.api.getNotifications(),
-    ])
-    setCounts(nextCounts)
-    setItems(nextItems.slice(0, 8))
+    try {
+      const [nextCounts, nextItems] = await Promise.all([
+        window.api.getNotificationCounts(),
+        window.api.getNotifications(),
+      ])
+      setCounts(nextCounts)
+      setItems(nextItems.slice(0, 8))
+    } catch {
+      setCounts({ total: 0, critical: 0, high: 0, medium: 0, low: 0 })
+      setItems([])
+    }
   }
 
   const updatePanelPosition = () => {

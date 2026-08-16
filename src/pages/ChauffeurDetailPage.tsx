@@ -47,14 +47,15 @@ export default function ChauffeurDetailPage() {
   const [chauffeur, setChauffeur] = useState<Chauffeur | null>(null)
 
   useEffect(() => {
-    if (!id) return
-    window.api.getChauffeur(Number(id)).then((data) => {
-      if (!data) {
-        navigate('/chauffeurs')
-        return
-      }
-      setChauffeur(data)
-    })
+    const chauffeurId = Number(id)
+    if (!Number.isFinite(chauffeurId) || chauffeurId <= 0) {
+      navigate('/chauffeurs')
+      return
+    }
+    window.api
+      .getChauffeur(chauffeurId)
+      .then((data) => (data ? setChauffeur(data) : navigate('/chauffeurs')))
+      .catch(() => navigate('/chauffeurs'))
   }, [id, navigate])
 
   const onOpenDocument = async (filePath: string) => {

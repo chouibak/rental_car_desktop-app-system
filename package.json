@@ -1,6 +1,6 @@
 {
   "name": "rental-car-crm",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "CRM de location de voitures — application bureau",
   "main": "dist-electron/main.js",
   "author": "LocAgence Pro",
@@ -10,6 +10,10 @@
     "start": "npm run build && electron .",
     "build": "tsc -p tsconfig.node.json --noEmit && vite build",
     "preview": "vite preview",
+    "check:payments": "node scripts/payment-flow-check.mjs",
+    "audit:payments": "node scripts/payment-audit.mjs",
+    "audit:data": "node scripts/data-audit.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "dist": "npm run build && electron-builder --win"
   },
   "build": {

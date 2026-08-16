@@ -1,8 +1,6 @@
 import type { Database } from 'sql.js'
 import { syncCarAvailability } from './cars-db'
-import { syncReservationPaymentStatus } from './payment-sync'
-import { agentLog } from './debug-log'
-
+import { reservationPaidExpr, syncReservationPaymentStatus } from './payment-sync'
 export type ReservationStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed'
 export type PaymentStatus = 'unpaid' | 'partial' | 'paid'
 export type DepositStatus = 'pending' | 'received' | 'refunded'
@@ -211,14 +209,20 @@ function syncLinkedContractFromReservation(
   return { days: billed, total_amount: total }
 }
 
+/** Continue from the highest reference of the year: counting rows collides after a delete. */
 function nextReference(helpers: DbHelpers) {
   const year = new Date().getFullYear()
-  const row = helpers.queryOne<{ c: number }>(
-    `SELECT COUNT(*) as c FROM reservations WHERE reference LIKE ?`,
-    [`RES-${year}-%`],
+  const prefix = `RES-${year}-`
+  const row = helpers.queryOne<{ reference: string }>(
+    `SELECT reference FROM reservations
+     WHERE reference LIKE ?
+     ORDER BY CAST(SUBSTR(reference, ?) AS INTEGER) DESC
+     LIMIT 1`,
+    [`${prefix}%`, String(prefix.length + 1)],
   )
-  const num = String((row?.c ?? 0) + 1).padStart(3, '0')
-  return `RES-${year}-${num}`
+  const last = row?.reference ? Number(row.reference.slice(prefix.length)) : 0
+  const next = (Number.isFinite(last) ? last : 0) + 1
+  return `${prefix}${String(next).padStart(3, '0')}`
 }
 
 function normalizeInput(data: ReservationInput, carsApi: CarsApi) {
@@ -273,7 +277,7 @@ function assertNoOverlap(
   // (otherwise save always fails with "Voiture non disponible").
   const contractOverlap = helpers.queryOne(
     `SELECT id FROM contracts
-     WHERE car_id = ? AND status = 'active' AND deleted_at IS NULL
+     WHERE car_id = ? AND status IN ('active', 'draft') AND deleted_at IS NULL
        AND (? IS NULL OR reservation_id IS NULL OR reservation_id != ?)
        AND NOT (
          date(COALESCE(NULLIF(return_at, ''), end_date)) < date(?)
@@ -296,18 +300,10 @@ export function createReservationsApi(helpers: DbHelpers, carsApi: CarsApi) {
       ch.name as chauffeur_name,
       ca.name as car_name,
       ca.plate_number as car_plate,
-      COALESCE((
-        SELECT SUM(amount) FROM reservation_payments rp
-        WHERE rp.reservation_id = r.id AND rp.type = 'rental' AND rp.status = 'completed'
-      ), 0)
-      + COALESCE((
-        SELECT SUM(p.amount) FROM payments p
-        INNER JOIN contracts c ON c.id = p.contract_id AND c.deleted_at IS NULL
-        WHERE c.reservation_id = r.id
-      ), 0) as paid_amount,
+      ${reservationPaidExpr()} as paid_amount,
       (
         SELECT COUNT(*) FROM contracts c
-        WHERE c.reservation_id = r.id AND c.deleted_at IS NULL
+        WHERE c.reservation_id = r.id AND c.deleted_at IS NULL AND c.status != 'cancelled'
       ) as contract_count,
       COALESCE((
         SELECT MAX(c.total_amount) FROM contracts c
@@ -552,20 +548,6 @@ export function createReservationsApi(helpers: DbHelpers, carsApi: CarsApi) {
     deleteReservation(id: number) {
       const existing = helpers.queryOne<ReservationRecord>('SELECT * FROM reservations WHERE id = ?', [id])
       if (!existing) throw new Error('RESERVATION_NOT_FOUND')
-      // #region agent log
-      {
-        const linked = helpers.queryOne<{ c: number }>(
-          `SELECT COUNT(*) as c FROM contracts WHERE reservation_id = ? AND deleted_at IS NULL`,
-          [id],
-        )
-        agentLog('D', 'reservations-db.ts:deleteReservation', 'Deleting reservation', {
-          reservationId: id,
-          carId: existing.car_id,
-          linkedLiveContracts: linked?.c ?? 0,
-          willOrphan: (linked?.c ?? 0) > 0,
-        })
-      }
-      // #endregion
       helpers.run('DELETE FROM reservations WHERE id = ?', [id])
       syncCarStatus(helpers, existing.car_id)
       return { ok: true }

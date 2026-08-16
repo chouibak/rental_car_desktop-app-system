@@ -4,6 +4,7 @@ import {
   moveToCustomerStorage,
 } from './customer-storage'
 import { deleteFileIfExists } from './storage'
+import { mergeDefined } from './input-utils'
 
 export type CustomerRecord = {
   id: number
@@ -165,8 +166,10 @@ export function migrateClientsToCustomers(db: Database, helpers: DbHelpers) {
 }
 
 function normalizeCustomerInput(data: CustomerInput) {
+  const name = data.name?.trim() ?? ''
+  if (!name) throw new Error('NAME_REQUIRED')
   return {
-    name: data.name.trim(),
+    name,
     phone: data.phone?.trim() ?? '',
     email: data.email?.trim() ?? '',
     birth_date: data.birth_date ?? '',
@@ -277,11 +280,11 @@ export function createCustomersApi(helpers: DbHelpers) {
       return created
     },
 
-    updateCustomer(id: number, data: CustomerInput) {
+    updateCustomer(id: number, data: Partial<CustomerInput>) {
       const existing = helpers.queryOne<CustomerRecord>('SELECT * FROM customers WHERE id = ?', [id])
       if (!existing) throw new Error('CUSTOMER_NOT_FOUND')
 
-      const normalized = normalizeCustomerInput(data)
+      const normalized = normalizeCustomerInput(mergeDefined(existing as CustomerInput, data))
       deleteRemovedPdfs(existing, normalized)
       const withPdfs = finalizePdfPaths(id, normalized)
       const t = helpers.now()
@@ -327,8 +330,12 @@ export function createCustomersApi(helpers: DbHelpers) {
         'SELECT id FROM contracts WHERE client_id = ? AND deleted_at IS NULL LIMIT 1',
         [id],
       )
-      const reserved = helpers.queryOne('SELECT id FROM reservations WHERE customer_id = ? LIMIT 1', [id])
-      if (used || reserved) throw new Error('CUSTOMER_HAS_CONTRACTS')
+      const reserved = helpers.queryOne(
+        `SELECT id FROM reservations WHERE customer_id = ? AND status IN ('pending', 'confirmed') LIMIT 1`,
+        [id],
+      )
+      if (used) throw new Error('CUSTOMER_HAS_CONTRACTS')
+      if (reserved) throw new Error('CUSTOMER_HAS_RESERVATIONS')
 
       const customer = helpers.queryOne<CustomerRecord>('SELECT * FROM customers WHERE id = ?', [id])
       if (!customer) throw new Error('CUSTOMER_NOT_FOUND')

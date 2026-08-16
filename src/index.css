@@ -359,6 +359,18 @@ a {
   border-inline-start: 1px solid var(--line);
 }
 
+.revenue-pdf-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.revenue-pdf-modal footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -960,6 +972,201 @@ th {
   gap: 10px;
 }
 
+.contract-form--admin {
+  display: grid;
+  gap: 14px;
+}
+
+.contract-admin-section {
+  overflow: hidden;
+}
+
+.contract-admin-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px 0;
+}
+
+.contract-admin-step {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.contract-admin-titles h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.contract-admin-titles p {
+  margin: 3px 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.contract-admin-body {
+  padding-top: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.driver-admin {
+  display: grid;
+  gap: 12px;
+}
+
+.driver-admin-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.driver-copy-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+.driver-copy-banner strong {
+  display: block;
+  font-size: 0.95rem;
+  color: var(--accent-hover);
+}
+
+.driver-copy-banner p {
+  margin: 4px 0 0;
+  font-size: 0.82rem;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.driver-copy-banner .btn {
+  flex-shrink: 0;
+  min-height: 42px;
+  padding: 10px 18px;
+  font-size: 0.92rem;
+}
+
+.driver-copy-banner .btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 800px) {
+  .driver-copy-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.driver-admin-block {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--accent-muted);
+}
+
+.driver-admin-label {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.driver2-empty-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 2px 8px;
+}
+
+.driver2-empty-card p {
+  margin: 0;
+}
+
+.equipment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.equipment-chip {
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.equipment-chip.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-hover);
+}
+
+.contract-billing-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--accent-muted);
+  border: 1px solid var(--accent-soft);
+}
+
+.contract-billing-summary > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.contract-billing-summary span {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.contract-billing-summary strong {
+  font-size: 1.25rem;
+  color: var(--ink);
+}
+
+.contract-billing-paid {
+  display: grid;
+  gap: 4px;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 800px) {
+  .driver2-empty-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 .contract-detail-page {
   display: grid;
   gap: 20px;
@@ -1356,8 +1563,8 @@ th {
 
 .contract-vehicle-hero {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(280px, 0.95fr);
-  gap: 20px;
+  grid-template-columns: 1fr;
+  gap: 16px;
   align-items: stretch;
   padding: 16px;
   border: 1px solid var(--line);
@@ -1365,16 +1572,24 @@ th {
   background: linear-gradient(135deg, #f8fafc 0%, #fff 100%);
 }
 
+.contract-vehicle-stack {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  width: 100%;
+}
+
 .contract-vehicle-media {
-  width: 120px;
+  width: 168px;
   flex-shrink: 0;
 }
 
 .contract-vehicle-photo,
 .contract-vehicle-placeholder,
 .contract-vehicle-photo-link {
-  width: 120px;
-  height: 88px;
+  width: 168px;
+  height: 112px;
   border-radius: 12px;
   border: 1px solid var(--line);
 }
@@ -1411,7 +1626,7 @@ th {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  justify-content: center;
+  width: auto;
 }
 
 .contract-vehicle-kicker {
@@ -1423,7 +1638,7 @@ th {
 }
 
 .contract-vehicle-name {
-  font-size: 1.12rem;
+  font-size: 1.02rem;
   font-weight: 700;
   line-height: 1.25;
 }
@@ -1437,7 +1652,8 @@ th {
 .contract-vehicle-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 6px;
   margin-top: 6px;
 }
 
@@ -1586,11 +1802,23 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .contract-vehicle-stack {
+    grid-template-columns: 1fr;
+  }
+
+  .contract-vehicle-stack,
   .contract-vehicle-media,
+  .contract-vehicle-identity,
   .contract-vehicle-photo,
-  .contract-vehicle-placeholder {
+  .contract-vehicle-placeholder,
+  .contract-vehicle-photo-link {
     width: 100%;
-    height: 140px;
+  }
+
+  .contract-vehicle-photo,
+  .contract-vehicle-placeholder,
+  .contract-vehicle-photo-link {
+    height: 160px;
   }
 
   .contract-vehicle-details {
@@ -2144,6 +2372,23 @@ th {
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
+}
+
+.contract-action-create {
+  padding: 18px 20px;
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  background: var(--bg);
+}
+
+.contract-action-create-copy {
+  flex: 1;
+  min-width: 220px;
+}
+
+.contract-action-create .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .contract-action-existing {
@@ -3180,8 +3425,8 @@ th {
 }
 
 .month-calendar-header-row {
-  position: sticky;
-  top: 0;
+    position: sticky;
+    top: 0;
   z-index: 3;
   background: #fff;
   border-bottom: 1px solid var(--line);
@@ -4798,6 +5043,15 @@ th {
   gap: 12px;
 }
 
+.reservation-detail-page .reservation-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-inline-start: 0;
+  border-inline-start: none;
+}
+
 .reservation-detail-page .car-detail-tabs {
   margin-bottom: 16px;
 }
@@ -4813,6 +5067,62 @@ th {
   flex-wrap: wrap;
   padding-inline-start: 0;
   border-inline-start: none;
+}
+
+.contract-status-switch {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.contract-status-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 7px 12px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.contract-status-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  color: var(--ink);
+}
+
+.contract-status-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.contract-status-btn.is-active {
+  cursor: default;
+}
+
+.contract-status-btn--active.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.contract-status-btn--draft.is-active {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.contract-status-btn--closed.is-active {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.contract-status-btn--cancelled.is-active {
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .contract-detail-toolbar {

@@ -1,5 +1,9 @@
 /** Calendar dates in the machine's local timezone (not UTC). */
 
+/** SQLite `now` is UTC by default; Morocco (UTC+1) needs localtime or overdue/today drift by a day. */
+export const SQL_NOW = `datetime('now', 'localtime')`
+export const SQL_TODAY = `date('now', 'localtime')`
+
 export function localYmd(d = new Date()) {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')

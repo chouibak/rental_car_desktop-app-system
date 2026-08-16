@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { fileBasename } from '../utils/file'
+import { mapAppError } from '../utils/errors'
 import { FUEL_FRACTION, FUEL_LEVELS } from '../utils/contracts'
 import type { Car, CarCategory, CarComputedStatus, CarFuel, CarImage, CarTransmission } from '../types'
 
@@ -103,9 +104,10 @@ export default function CarFormPage() {
         doc_vignette_path: fileBasename(car.doc_vignette_path),
         doc_autorisation_path: fileBasename(car.doc_autorisation_path),
       })
-      setLoading(false)
     })
-  }, [isEdit, carId, navigate])
+      .catch(() => setError(t.loadFailed))
+      .finally(() => setLoading(false))
+  }, [isEdit, carId, navigate, t])
 
   const docMeta = useMemo(
     () =>
@@ -117,7 +119,7 @@ export default function CarFormPage() {
     [],
   )
 
-  const syncName = (next: Partial<Car>) => {
+  const syncName = <T extends Partial<Car>>(next: T): T => {
     if (!next.name && next.brand && next.model) {
       next.name = `${next.brand} ${next.model}`.trim()
     }
@@ -142,8 +144,9 @@ export default function CarFormPage() {
     setPhotoUrls(pUrls)
   }
 
+  /** Saves an edited car right away; returns false when the car was left untouched. */
   const persistIfEdit = async (nextForm: Partial<Car> & { images: CarImage[] }) => {
-    if (!isEdit || !carId) return
+    if (!isEdit || !carId) return false
     try {
       const updated = await window.api.updateCar(carId, buildPayload(nextForm))
       const images = updated.images ?? []
@@ -156,8 +159,10 @@ export default function CarFormPage() {
         doc_vignette_path: fileBasename(updated.doc_vignette_path),
         doc_autorisation_path: fileBasename(updated.doc_autorisation_path),
       })
-    } catch {
-      setError(t.cannotSaveDocument)
+      return true
+    } catch (err) {
+      setError(mapAppError(err, t))
+      return false
     }
   }
 
@@ -187,7 +192,7 @@ export default function CarFormPage() {
       await persistIfEdit(nextForm)
     } catch (err) {
       const msg = String(err)
-      setError(msg.includes('NOT_AN_IMAGE') ? t.notAnImage : msg)
+      setError(msg.includes('NOT_AN_IMAGE') ? t.notAnImage : mapAppError(err, t))
     }
   }
 
@@ -197,13 +202,15 @@ export default function CarFormPage() {
       images: (form.images ?? []).filter((img) => img.path !== path),
     }
     setForm(nextForm)
-    await window.api.deleteCarFile(path)
     setPhotoUrls((u) => {
       const next = { ...u }
       delete next[path]
       return next
     })
-    await persistIfEdit(nextForm)
+
+    // On a saved car the update removes the file; otherwise drop the pending upload here.
+    const persisted = await persistIfEdit(nextForm)
+    if (!persisted && !isEdit) await window.api.deleteCarFile(path)
   }
 
   const onAddDocument = async (docKey: DocKey) => {
@@ -211,7 +218,7 @@ export default function CarFormPage() {
     if (!picked) return
     const pathKey = `${docKey}_path` as keyof Car
     const oldPath = form[pathKey] as string
-    if (oldPath && oldPath !== picked.path) await window.api.deleteCarFile(oldPath)
+    if (!isEdit && oldPath && oldPath !== picked.path) await window.api.deleteCarFile(oldPath)
 
     const nextForm = { ...form, [pathKey]: picked.path }
     setForm(nextForm)
@@ -233,11 +240,11 @@ export default function CarFormPage() {
   const onRemoveDocument = async (docKey: DocKey) => {
     const pathKey = `${docKey}_path` as keyof Car
     const oldPath = form[pathKey] as string
-    if (oldPath) await window.api.deleteCarFile(oldPath)
     const nextForm = { ...form, [pathKey]: '', [`${docKey}_expiry`]: '' }
     setForm(nextForm)
     setDocFileNames((names) => ({ ...names, [pathKey]: '' }))
-    await persistIfEdit(nextForm)
+    const saved = !isEdit || (await persistIfEdit(nextForm))
+    if (saved && oldPath) await window.api.deleteCarFile(oldPath)
   }
 
   const onSubmit = async (e: FormEvent) => {
@@ -252,8 +259,7 @@ export default function CarFormPage() {
       else await window.api.createCar(payload)
       navigate('/cars')
     } catch (err) {
-      const msg = String(err)
-      setError(msg.includes('PLATE_EXISTS') ? t.plateExists : msg)
+      setError(mapAppError(err, t))
     } finally {
       setSaving(false)
     }

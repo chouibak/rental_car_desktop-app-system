@@ -91,6 +91,15 @@ export default function App() {
     return () => window.removeEventListener('agency-settings-updated', loadAgencyBranding)
   }, [t.appName])
 
+  useEffect(() => {
+    window.api
+      .getSettings()
+      .then((settings) => {
+        if (settings.language === 'fr' || settings.language === 'ar') setLang(settings.language)
+      })
+      .catch(() => undefined)
+  }, [setLang])
+
   const links = [
     { to: '/', label: t.dashboard },
     { to: '/cars', label: t.cars },
@@ -152,10 +161,24 @@ export default function App() {
             </button>
           </div>
           <div className="lang-switch">
-            <button type="button" className={lang === 'fr' ? 'active' : ''} onClick={() => setLang('fr')}>
+            <button
+              type="button"
+              className={lang === 'fr' ? 'active' : ''}
+              onClick={() => {
+                setLang('fr')
+                window.api.saveSettings({ language: 'fr' }).catch(() => undefined)
+              }}
+            >
               FR
             </button>
-            <button type="button" className={lang === 'ar' ? 'active' : ''} onClick={() => setLang('ar')}>
+            <button
+              type="button"
+              className={lang === 'ar' ? 'active' : ''}
+              onClick={() => {
+                setLang('ar')
+                window.api.saveSettings({ language: 'ar' }).catch(() => undefined)
+              }}
+            >
               ع
             </button>
           </div>

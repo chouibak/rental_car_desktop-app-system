@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useLang } from '../context/LangContext'
 import type { CarVidange } from '../types'
+import { todayYmd } from '../utils/calendar'
 
 type CarVidangeModalProps = {
   open: boolean
@@ -14,7 +15,7 @@ type CarVidangeModalProps = {
 }
 
 const emptyForm = (mileage: number) => ({
-  performed_at: new Date().toISOString().slice(0, 10),
+  performed_at: todayYmd(),
   mileage,
   cost: '',
   notes: '',

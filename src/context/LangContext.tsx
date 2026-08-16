@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { Lang } from './types'
+import type { Lang } from '../types'
 import { dictionaries, type Dict } from '../i18n'
 import { formatMoney } from '../utils/money'
 

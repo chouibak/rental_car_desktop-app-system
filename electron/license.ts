@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { writeJsonFileAtomic } from './storage'
 
 export type LicenseType = 'trial_7d' | 'trial_5min' | 'lifetime'
 
@@ -99,7 +100,7 @@ function writeStoredLicense(type: LicenseType) {
       : new Date(Date.now() + TRIAL_MS[type]).toISOString()
   const signature = signPayload(type, activatedAt, expiresAt)
   const payload: StoredLicense = { type, activatedAt, expiresAt, signature }
-  fs.writeFileSync(licenseFilePath, JSON.stringify(payload), 'utf8')
+  writeJsonFileAtomic(licenseFilePath, payload)
 }
 
 function buildStatus(stored: (StoredLicense & { type: LicenseType }) | null): LicenseStatus {

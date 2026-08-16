@@ -6,6 +6,7 @@ import { CarStatusBadge, EmptyState, PageHeader, StatCard } from '../components/
 import { useLang } from '../context/LangContext'
 import { monthBoundaryIsoRange, startOfMonth } from '../utils/calendar'
 import { formatContractDatetime } from '../utils/contracts'
+import { formatNumber } from '../utils/money'
 import { computeVidangeStatus, getVidangeTrafficLevel } from '../utils/vidange'
 import type { Car, CarComputedStatus, CarStats, Reservation } from '../types'
 
@@ -23,9 +24,23 @@ export default function CarsPage() {
   const [category, setCategory] = useState<(typeof CATEGORIES)[number] | ''>('')
   const [thumbUrls, setThumbUrls] = useState<Record<number, string>>({})
   const [view, setView] = useState<'list' | 'calendar'>('list')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
 
   const load = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      await fetchCars()
+    } catch {
+      setError(t.loadFailed)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchCars = async () => {
     const filters = {
       q: q || undefined,
       status: status || undefined,
@@ -174,7 +189,7 @@ export default function CarsPage() {
                 {cars.length === 0 && (
                   <tr>
                     <td colSpan={8}>
-                      <EmptyState message={t.noData} />
+                      <EmptyState message={loading ? t.loading : error || t.noData} />
                     </td>
                   </tr>
                 )}
@@ -224,7 +239,7 @@ export default function CarsPage() {
                                 : t.vidangeStatusOk
                         let remaining = ''
                         if (!vidange.never_done && vidange.km_remaining != null) {
-                          const n = Math.abs(Math.round(vidange.km_remaining)).toLocaleString('fr-FR')
+                          const n = formatNumber(Math.abs(vidange.km_remaining))
                           remaining =
                             vidange.km_remaining <= 0
                               ? t.vidangeKmOverdue.replace('{n}', n)

@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { IconDownload, IconEdit, IconPlus, IconSearch, IconTrash } from '../components/icons'
+import { PeriodPdfModal } from '../components/PeriodPdfModal'
 import { HorizontalBreakdownChart, toCategoryRows } from '../components/RevenueCharts'
 import { EmptyState, PageHeader, StatCard } from '../components/ui'
 import { useLang } from '../context/LangContext'
+import { useToast } from '../context/ToastContext'
 import type { Dict } from '../i18n'
 import type { Car, Expense, ExpenseCategory, ExpenseStats } from '../types'
+import { mapAppError } from '../utils/errors'
 import { formatDisplayDate } from '../utils/customer'
 
 const CATEGORIES: ExpenseCategory[] = [
@@ -38,8 +41,17 @@ const PAYMENT_METHOD_KEYS = {
   bank_transfer: 'bank_transfer',
 } as const
 
+function currentYear() {
+  return new Date().getFullYear()
+}
+
+function currentMonth() {
+  return new Date().getMonth() + 1
+}
+
 export default function ExpensesPage() {
-  const { t, money } = useLang()
+  const { t, money, lang } = useLang()
+  const { showError } = useToast()
   const navigate = useNavigate()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [stats, setStats] = useState<ExpenseStats | null>(null)
@@ -49,6 +61,23 @@ export default function ExpensesPage() {
   const [carId, setCarId] = useState<number | ''>('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [year, setYear] = useState(currentYear)
+  const [month, setMonth] = useState(currentMonth)
+  const [pdfOpen, setPdfOpen] = useState(false)
+  const [pdfSaving, setPdfSaving] = useState(false)
+
+  const years = useMemo(() => {
+    const y = currentYear()
+    return [y, y - 1, y - 2, y - 3]
+  }, [])
+
+  const monthOptions = useMemo(() => {
+    const locale = lang === 'ar' ? 'ar-MA' : 'fr-FR'
+    return Array.from({ length: 12 }, (_, index) => ({
+      value: index + 1,
+      label: new Date(2000, index, 1).toLocaleDateString(locale, { month: 'long' }),
+    }))
+  }, [lang])
 
   const filters = useMemo(
     () => ({
@@ -92,6 +121,19 @@ export default function ExpensesPage() {
     const result = await window.api.exportExpensesExcel(filters)
     if (result.ok && result.filePath) {
       await window.api.openExpenseFile(result.filePath)
+    }
+  }
+
+  const onDownloadPdf = async () => {
+    setPdfSaving(true)
+    try {
+      const result = await window.api.exportExpensesPdf(year, month)
+      if (result?.ok) setPdfOpen(false)
+      else if (!result?.canceled) showError(t.saveFailed)
+    } catch (err) {
+      showError(mapAppError(err, t))
+    } finally {
+      setPdfSaving(false)
     }
   }
 
@@ -151,6 +193,10 @@ export default function ExpensesPage() {
           />
         </div>
         <div className="toolbar-actions">
+          <button type="button" className="btn sm" onClick={() => setPdfOpen(true)}>
+            <IconDownload size={16} />
+            {t.downloadPdf}
+          </button>
           <button className="btn secondary sm" onClick={onExport}>
             <IconDownload size={16} />
             {t.exportExcel}
@@ -263,6 +309,19 @@ export default function ExpensesPage() {
           </table>
         </div>
       </div>
+
+      <PeriodPdfModal
+        open={pdfOpen}
+        year={year}
+        month={month}
+        years={years}
+        monthOptions={monthOptions}
+        saving={pdfSaving}
+        onYearChange={setYear}
+        onMonthChange={setMonth}
+        onCancel={() => setPdfOpen(false)}
+        onConfirm={onDownloadPdf}
+      />
     </div>
   )
 }

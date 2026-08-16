@@ -159,7 +159,7 @@ export function createNotificationsApi(helpers: DbHelpers, getSettings: () => Re
        FROM contracts c
        JOIN customers cu ON cu.id = c.client_id
        JOIN cars ca ON ca.id = c.car_id
-       WHERE c.status = 'active' AND c.deleted_at IS NULL`,
+       WHERE c.status IN ('active', 'draft') AND c.deleted_at IS NULL`,
     )
 
     const items: Notification[] = []
@@ -209,7 +209,7 @@ export function createNotificationsApi(helpers: DbHelpers, getSettings: () => Re
            SELECT 1 FROM contracts c
            WHERE c.reservation_id = r.id
              AND c.deleted_at IS NULL
-             AND c.status IN ('draft', 'active')
+             AND c.status IN ('active', 'draft')
          )`,
     )
 

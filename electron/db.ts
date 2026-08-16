@@ -39,6 +39,15 @@ import {
   syncReservationPaymentStatusForContract,
 } from './payment-sync'
 import {
+  createContractPayment,
+  deleteContractPayment,
+  migratePaymentsTable,
+  reconcileAllOverpayments,
+  reconcileContractOverpayment,
+  updateContractPayment,
+  type PaymentRecordStatus,
+} from './payment-ledger'
+import {
   CARS_IN_USE_SQL,
   OVERDUE_RENTALS_COUNT_SQL,
   UPCOMING_RETURNS_SQL,
@@ -190,9 +199,12 @@ function daysBetween(start: string, end: string) {
   return Math.max(1, diff)
 }
 
+/** Write to a temp file and rename: an interrupted write must not corrupt the database. */
 function save() {
   const data = db.export()
-  fs.writeFileSync(dbPath, Buffer.from(data))
+  const tempPath = `${dbPath}.tmp`
+  fs.writeFileSync(tempPath, Buffer.from(data))
+  fs.renameSync(tempPath, dbPath)
 }
 
 function queryAll<T = Record<string, unknown>>(sql: string, params: unknown[] = []): T[] {
@@ -262,9 +274,11 @@ function createSupportSchema(db: Database) {
       contract_id INTEGER NOT NULL,
       amount REAL NOT NULL,
       method TEXT NOT NULL DEFAULT 'cash',
+      status TEXT NOT NULL DEFAULT 'completed',
       paid_at TEXT NOT NULL,
       note TEXT,
-      created_at TEXT
+      created_at TEXT,
+      updated_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS returns (
@@ -366,12 +380,11 @@ export async function initDb(userDataPath: string) {
   revenueApi = createRevenueApi(dbHelpers())
   notificationsApi = createNotificationsApi(dbHelpers(), getSettingsMap)
 
+  migratePaymentsTable(db, dbHelpers())
   syncAllReservationPaymentStatuses(dbHelpers())
+  reconcileAllOverpayments(dbHelpers())
   syncAllCarStatuses(dbHelpers())
 
-  const isFirstRun = !queryOne<{ key: string }>(
-    "SELECT key FROM settings WHERE key = 'company_name' LIMIT 1",
-  )
   applyDefaultSettings()
 
   const orphanImages = queryAll<{ id: number; path: string; car_id: number }>(
@@ -386,68 +399,7 @@ export async function initDb(userDataPath: string) {
     `DELETE FROM car_images WHERE car_id NOT IN (SELECT id FROM cars)`,
   )
 
-  if (isFirstRun) {
-    const t = now()
-    const carCount = queryOne<{ c: number }>('SELECT COUNT(*) as c FROM cars')
-    if ((carCount?.c ?? 0) === 0) {
-      carsApi.createCar({
-        name: 'Dacia Logan',
-        brand: 'Dacia',
-        model: 'Logan',
-        plate_number: '12345-A-1',
-        year: 2022,
-        color: 'Blanc',
-        fuel: 'Diesel',
-        price_per_day: 250,
-        category: 'compacte',
-        mileage: 45000,
-        is_available: true,
-      })
-      carsApi.createCar({
-        name: 'Hyundai Tucson',
-        brand: 'Hyundai',
-        model: 'Tucson',
-        plate_number: '67890-B-2',
-        year: 2023,
-        color: 'Noir',
-        fuel: 'Essence',
-        price_per_day: 450,
-        category: 'suv',
-        mileage: 22000,
-        is_available: true,
-      })
-      carsApi.createCar({
-        name: 'Renault Clio',
-        brand: 'Renault',
-        model: 'Clio',
-        plate_number: '11223-C-3',
-        year: 2021,
-        color: 'Rouge',
-        fuel: 'Essence',
-        price_per_day: 200,
-        category: 'economique',
-        mileage: 61000,
-        is_available: false,
-      })
-    }
-
-    const customerCount = queryOne<{ c: number }>('SELECT COUNT(*) as c FROM customers')
-    if ((customerCount?.c ?? 0) === 0) {
-      db.run(
-        `INSERT INTO customers (name, phone, email, cin_number, address, license_number, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['Ahmed Benali', '0612345678', 'ahmed@email.com', 'AB123456', 'Casablanca', 'L-998877', t, t],
-      )
-      db.run(
-        `INSERT INTO customers (name, phone, email, cin_number, address, license_number, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        ['Fatima Zahra', '0698765432', 'fatima@email.com', 'CD654321', 'Rabat', 'L-112233', t, t],
-      )
-    }
-    save()
-  } else {
-    save()
-  }
+  save()
 
   initAuth(userDataPath, dbHelpers())
 }
@@ -466,6 +418,7 @@ export type PaymentInput = {
   contract_id: number
   amount: number
   method?: string
+  status?: PaymentRecordStatus
   paid_at?: string
   note?: string
 }
@@ -479,6 +432,12 @@ export type ReturnInput = {
   return_damages?: Array<{ part: string; type: string; note: string; photo?: string }>
   extra_fees?: number
   notes?: string
+}
+
+/** A contract's billed total may have changed: give cash back if it now exceeds the total. */
+function afterContractTotalChange(id: number) {
+  reconcileContractOverpayment(dbHelpers(), id)
+  syncReservationPaymentStatusForContract(dbHelpers(), id)
 }
 
 export function getDbApi() {
@@ -513,6 +472,7 @@ export function getDbApi() {
         `SELECT ca.id as car_id, ca.name, ca.brand, ca.model, ca.plate_number, COUNT(c.id) as rentals
          FROM cars ca
          LEFT JOIN contracts c ON c.car_id = ca.id AND c.deleted_at IS NULL
+           AND c.status IN ('active', 'closed')
          GROUP BY ca.id
          ORDER BY rentals DESC, ca.name ASC
          LIMIT 6`,
@@ -632,8 +592,17 @@ export function getDbApi() {
     createReservation: (data: ReservationInput) => reservationsApi.createReservation(data),
     updateReservation: (id: number, data: ReservationInput) => reservationsApi.updateReservation(id, data),
     deleteReservation: (id: number) => {
+      // A reservation that produced a live contract cannot be removed: the contract would
+      // be left pointing at a row that no longer exists.
+      const liveContract = queryOne(
+        `SELECT id FROM contracts
+         WHERE reservation_id = ? AND deleted_at IS NULL AND status != 'cancelled'`,
+        [id],
+      )
+      if (liveContract) throw new Error('RESERVATION_HAS_CONTRACTS')
+
       const t = now()
-      // Soft-delete linked contracts so their payments leave recettes/stats.
+      // Cancelled contracts still hold payments: archive them so recettes/stats drop them.
       run(
         `UPDATE contracts SET deleted_at = ?, updated_at = ?
          WHERE reservation_id = ? AND deleted_at IS NULL`,
@@ -672,7 +641,7 @@ export function getDbApi() {
     updateContract: (id: number, data: ContractInput) => {
       const result = contractsApi.updateContract(id, data)
       syncAllCarStatuses(dbHelpers())
-      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      afterContractTotalChange(id)
       return result
     },
     deleteContract: (id: number) => {
@@ -690,7 +659,7 @@ export function getDbApi() {
     restoreContract: (id: number) => {
       const result = contractsApi.restoreContract(id)
       syncAllCarStatuses(dbHelpers())
-      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      afterContractTotalChange(id)
       return result
     },
     createContractFromReservation: (reservationId: number) => {
@@ -706,37 +675,37 @@ export function getDbApi() {
     closeContract: (id: number, data: CloseContractInput) => {
       const result = contractsApi.closeContract(id, data)
       syncAllCarStatuses(dbHelpers())
-      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      afterContractTotalChange(id)
       return result
     },
     updateReturnHandover: (id: number, data: CloseContractInput) => {
       const result = contractsApi.updateReturnHandover(id, data)
       syncAllCarStatuses(dbHelpers())
-      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      afterContractTotalChange(id)
       return result
     },
     cancelContract: (id: number) => {
       const result = contractsApi.cancelContract(id)
       syncAllCarStatuses(dbHelpers())
-      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      afterContractTotalChange(id)
       return result
     },
     extendContract: (id: number, data: ExtendContractInput) => {
       const result = contractsApi.extendContract(id, data)
       syncAllCarStatuses(dbHelpers())
-      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      afterContractTotalChange(id)
       return result
     },
     setContractExtension: (id: number, data: SetContractExtensionInput) => {
       const result = contractsApi.setContractExtension(id, data)
       syncAllCarStatuses(dbHelpers())
-      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      afterContractTotalChange(id)
       return result
     },
     removeContractExtension: (id: number) => {
       const result = contractsApi.removeContractExtension(id)
       syncAllCarStatuses(dbHelpers())
-      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      afterContractTotalChange(id)
       return result
     },
     getContractStats: () => contractsApi.getContractStats(),
@@ -752,67 +721,39 @@ export function getDbApi() {
         return_extra_fees: data.extra_fees,
       })
       syncAllCarStatuses(dbHelpers())
-      syncReservationPaymentStatusForContract(dbHelpers(), id)
+      afterContractTotalChange(id)
       return result
     },
 
     listPayments(contractId?: number) {
       if (contractId) {
-        return queryAll('SELECT * FROM payments WHERE contract_id = ? ORDER BY id DESC', [contractId])
+        return queryAll(
+          `SELECT * FROM payments WHERE contract_id = ?
+           ORDER BY datetime(replace(substr(COALESCE(paid_at, created_at, ''), 1, 19), 'T', ' ')) DESC, id DESC`,
+          [contractId],
+        )
       }
       return queryAll(
         `SELECT p.*, c.contract_number, cu.name as client_name
          FROM payments p
          JOIN contracts c ON c.id = p.contract_id
          JOIN customers cu ON cu.id = c.client_id
-         ORDER BY p.id DESC`,
+         ORDER BY datetime(replace(substr(COALESCE(p.paid_at, p.created_at, ''), 1, 19), 'T', ' ')) DESC, p.id DESC`,
       )
     },
 
     createPayment(data: PaymentInput) {
-      if (!Number.isFinite(Number(data.amount)) || Number(data.amount) <= 0) {
-        throw new Error('INVALID_AMOUNT')
-      }
-      const t = now()
-      const id = runInsert(
-        `INSERT INTO payments (contract_id, amount, method, paid_at, note, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [data.contract_id, data.amount, data.method ?? 'cash', data.paid_at ?? t.slice(0, 10), data.note ?? '', t],
-      )
-      syncReservationPaymentStatusForContract(dbHelpers(), data.contract_id)
+      const id = createContractPayment(dbHelpers(), data)
       return queryOne('SELECT * FROM payments WHERE id = ?', [id])
     },
 
     deletePayment(id: number) {
-      const payment = queryOne<{ contract_id: number }>('SELECT contract_id FROM payments WHERE id = ?', [id])
-      run('DELETE FROM payments WHERE id = ?', [id])
-      if (payment?.contract_id) {
-        syncReservationPaymentStatusForContract(dbHelpers(), payment.contract_id)
-      }
+      deleteContractPayment(dbHelpers(), id)
       return { ok: true }
     },
 
     updatePayment(id: number, data: Partial<Omit<PaymentInput, 'contract_id'>>) {
-      const existing = queryOne<{ contract_id: number; amount: number; method: string; paid_at: string; note: string }>(
-        'SELECT contract_id, amount, method, paid_at, note FROM payments WHERE id = ?',
-        [id],
-      )
-      if (!existing) throw new Error('PAYMENT_NOT_FOUND')
-
-      const amount = data.amount ?? existing.amount
-      if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) throw new Error('INVALID_AMOUNT')
-
-      run(
-        `UPDATE payments SET amount = ?, method = ?, paid_at = ?, note = ? WHERE id = ?`,
-        [
-          amount,
-          data.method ?? existing.method,
-          data.paid_at ?? existing.paid_at,
-          data.note ?? existing.note,
-          id,
-        ],
-      )
-      syncReservationPaymentStatusForContract(dbHelpers(), existing.contract_id)
+      updateContractPayment(dbHelpers(), id, data)
       return queryOne('SELECT * FROM payments WHERE id = ?', [id])
     },
 
@@ -839,6 +780,7 @@ export function getDbApi() {
     deleteChauffeur: (id: number) => chauffeursApi.deleteChauffeur(id),
 
     getRevenueStats: () => revenueApi.getRevenueStats(),
+    getRevenuePeriodSummary: (year: number, month: number) => revenueApi.getRevenuePeriodSummary(year, month),
 
     getNotifications: () => notificationsApi.getNotifications(),
     getNotificationCounts: () => notificationsApi.getNotificationCounts(),
@@ -848,13 +790,15 @@ export function getDbApi() {
     },
 
     saveSettings(data: Record<string, string>) {
+      // One export at the end instead of one per key, so the file never holds a half-saved form.
       for (const [key, value] of Object.entries(data)) {
-        run(
+        db.run(
           `INSERT INTO settings (key, value) VALUES (?, ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-          [key, value],
+          [key, value] as never[],
         )
       }
+      save()
       return this.getSettings()
     },
   }

@@ -15,8 +15,12 @@ import { ContractHandoverForm } from '../components/ContractHandoverModal'
 import { CarStatusBadge, EmptyState, PaymentBadge, StatCard, StatusBadge } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { useToast } from '../context/ToastContext'
-import type { Car, Contract } from '../types'
-import { FUEL_FRACTION, formatContractDatetime, parseDamages, parseEquipment, getBaseReturnAt, getOriginalRentalTotal, calcExtensionPreview } from '../utils/contracts'
+import type { Car, Contract, ContractStatus, Payment, PaymentMethod } from '../types'
+import { deletePayment, paymentErrorMessage, savePayment } from '../utils/payments'
+import { mapAppError } from '../utils/errors'
+import { CONTRACT_STATUSES, FUEL_FRACTION, formatContractDate, formatContractDatetime, parseDamages, parseEquipment, getBaseReturnAt, getOriginalRentalTotal, calcExtensionPreview } from '../utils/contracts'
+import { deliveryPlaceForDisplay } from '../utils/reservation'
+import { todayYmd } from '../utils/calendar'
 
 type ContractTab = 'overview' | 'livraison' | 'reprise' | 'prolongation'
 
@@ -24,6 +28,17 @@ function display(value: string | number | null | undefined) {
   if (value === null || value === undefined) return '—'
   if (typeof value === 'string' && !value.trim()) return '—'
   return String(value)
+}
+
+/** Hide auto-generated prolongation audit lines from the Notes panel. */
+function displayContractNotes(notes: string | null | undefined) {
+  if (!notes?.trim()) return ''
+  return notes
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !/^Prolongation\b/i.test(line))
+    .join('\n')
+    .trim()
 }
 
 function contractPaymentStatus(paid: number, total: number) {
@@ -57,16 +72,23 @@ export default function ContractDetailPage() {
   const [payOpen, setPayOpen] = useState(false)
   const [paySaving, setPaySaving] = useState(false)
   const [payError, setPayError] = useState('')
+  const [payFromExtension, setPayFromExtension] = useState(false)
+  const [payEditing, setPayEditing] = useState<Payment | null>(null)
   const [payForm, setPayForm] = useState({
     amount: 0,
     method: 'cash',
-    paid_at: new Date().toISOString().slice(0, 10),
+    paid_at: todayYmd(),
     note: '',
   })
+  const [statusSaving, setStatusSaving] = useState(false)
 
   const load = async () => {
     if (!id) return
     const data = await window.api.getContract(Number(id))
+    if (!data) {
+      navigate('/contracts')
+      return
+    }
     setContract(data)
 
     if (data?.car_id) {
@@ -85,7 +107,8 @@ export default function ContractDetailPage() {
   }
 
   useEffect(() => {
-    load()
+    // A missing or unreadable contract must not leave the page spinning forever.
+    load().catch(() => navigate('/contracts'))
   }, [id])
 
   useEffect(() => {
@@ -163,7 +186,6 @@ export default function ContractDetailPage() {
       targetDays,
       dirty,
       baseReturnAt: originalReturnAt,
-      originalTotal,
       paid,
       ...preview,
       unchanged: !dirty,
@@ -209,6 +231,7 @@ export default function ContractDetailPage() {
   const canPay = contract.status === 'active' || contract.status === 'draft' || contract.status === 'closed'
   const canExtend = contract.status === 'active' || contract.status === 'draft'
   const extensionDaysTotal = Number(contract.extension_days ?? 0) || 0
+  const currentStatus: ContractStatus = contract.status === 'completed' ? 'closed' : (contract.status as ContractStatus)
 
   const tabs: {
     id: ContractTab
@@ -264,6 +287,7 @@ export default function ContractDetailPage() {
     setExtendSaving(true)
     try {
       const targetDays = Math.floor(extendForm.extension_days)
+      const extraToCollect = Math.max(0, Number(extendPreview.newRemaining) || 0)
       const updated = await window.api.setContractExtension(contract.id, {
         extension_days: targetDays,
         note: extendForm.note.trim() || undefined,
@@ -272,12 +296,15 @@ export default function ContractDetailPage() {
       setExtendForm({ extension_days: targetDays, note: '' })
       await load()
       showSuccess(targetDays < 1 ? t.extensionRemoveSuccess : t.extendSaveSuccess)
+      if (
+        targetDays > extendPreview.currentExtension &&
+        extraToCollect > 0.001 &&
+        (contract.status === 'active' || contract.status === 'draft' || contract.status === 'closed')
+      ) {
+        openPayForm(extraToCollect, true)
+      }
     } catch (err) {
-      const msg = String(err)
-      let shown = msg
-      if (msg.includes('EXTENSION_MUST_BE_LATER')) shown = t.extensionMustBeLater
-      else if (msg.includes('INVALID_EXTENSION_DAYS')) shown = t.invalidExtensionDays
-      else if (msg.includes('CAR_NOT_AVAILABLE')) shown = t.carNotAvailable
+      const shown = mapAppError(err, t)
       setExtendError(shown)
       alert(shown)
     } finally {
@@ -298,10 +325,7 @@ export default function ContractDetailPage() {
       await load()
       showSuccess(t.extensionRemoveSuccess)
     } catch (err) {
-      const msg = String(err)
-      let shown = msg
-      if (msg.includes('CAR_NOT_AVAILABLE')) shown = t.carNotAvailable
-      else if (msg.includes('INVALID_CONTRACT_STATUS')) shown = t.invalidContractStatus
+      const shown = mapAppError(err, t)
       setExtendError(shown)
       alert(shown)
     } finally {
@@ -309,7 +333,7 @@ export default function ContractDetailPage() {
     }
   }
 
-  const openPayForm = (suggestedAmount?: number) => {
+  const openPayForm = (suggestedAmount?: number, fromExtension = false) => {
     const amount =
       suggestedAmount != null && Number.isFinite(suggestedAmount) && suggestedAmount > 0
         ? Math.round(suggestedAmount * 100) / 100
@@ -317,16 +341,32 @@ export default function ContractDetailPage() {
           ? Math.round(summary.remaining * 100) / 100
           : 0
     setPayError('')
+    setPayEditing(null)
+    setPayFromExtension(fromExtension)
     setPayForm({
       amount,
       method: 'cash',
-      paid_at: new Date().toISOString().slice(0, 10),
-      note: '',
+      paid_at: todayYmd(),
+      // Stable marker (FR) so clawback finds prolongation payments in any UI language.
+      note: fromExtension ? 'Prolongation' : '',
     })
     setPayOpen(true)
   }
 
-  const addPayment = async (e: FormEvent) => {
+  const openPayEdit = (payment: Payment) => {
+    setPayError('')
+    setPayEditing(payment)
+    setPayFromExtension(false)
+    setPayForm({
+      amount: payment.amount,
+      method: payment.method || 'cash',
+      paid_at: payment.paid_at?.slice(0, 10) || todayYmd(),
+      note: payment.note || '',
+    })
+    setPayOpen(true)
+  }
+
+  const submitPayment = async (e: FormEvent) => {
     e.preventDefault()
     if (!contract) return
     setPayError('')
@@ -336,21 +376,35 @@ export default function ContractDetailPage() {
     }
     setPaySaving(true)
     try {
-      await window.api.createPayment({
+      await savePayment({
+        source: payEditing?.source ?? 'contract',
+        id: payEditing?.id,
         contract_id: contract.id,
+        reservation_id: payEditing?.reservation_id ?? contract.reservation_id,
         amount: payForm.amount,
-        method: payForm.method,
+        method: payForm.method as PaymentMethod,
         paid_at: payForm.paid_at,
-        note: payForm.note.trim(),
+        note: payForm.note.trim() || (payFromExtension ? 'Prolongation' : ''),
       })
       setPayOpen(false)
+      setPayEditing(null)
+      setPayFromExtension(false)
       await load()
       showSuccess(t.paymentSaveSuccess)
     } catch (err) {
-      const msg = String(err)
-      setPayError(msg.includes('INVALID_AMOUNT') ? t.invalidAmount : msg)
+      setPayError(paymentErrorMessage(err, t))
     } finally {
       setPaySaving(false)
+    }
+  }
+
+  const removePayment = async (payment: Payment) => {
+    if (!confirm(t.confirmDelete)) return
+    try {
+      await deletePayment({ source: payment.source ?? 'contract', id: payment.id })
+      await load()
+    } catch (err) {
+      alert(paymentErrorMessage(err, t))
     }
   }
 
@@ -365,6 +419,35 @@ export default function ContractDetailPage() {
     }
   }
 
+  const changeContractStatus = async (next: ContractStatus) => {
+    if (next === currentStatus || statusSaving) return
+    setStatusSaving(true)
+    try {
+      let updated: Contract | null = null
+      if (next === 'active' && currentStatus === 'draft') {
+        updated = await window.api.markContractDelivered(contract.id)
+      } else if (next === 'closed' && currentStatus === 'active') {
+        updated = await window.api.closeContract(contract.id, {
+          return_at: contract.return_at,
+          return_mileage: contract.return_mileage,
+          return_fuel_level: contract.return_fuel_level,
+          return_notes: contract.return_notes,
+        })
+      } else if (next === 'cancelled' && currentStatus !== 'closed') {
+        updated = await window.api.cancelContract(contract.id)
+      } else {
+        updated = await window.api.updateContract(contract.id, { status: next })
+      }
+      if (updated) setContract(updated)
+      await load()
+      showSuccess(t.saveSuccess)
+    } catch (err) {
+      alert(mapAppError(err, t))
+    } finally {
+      setStatusSaving(false)
+    }
+  }
+
   const openPdfDialog = () => setPdfOpen(true)
 
   const confirmPdfDownload = async () => {
@@ -374,7 +457,7 @@ export default function ContractDetailPage() {
       await window.api.generateContractPdf(contract.id)
       setPdfOpen(false)
     } catch (err) {
-      alert(String(err))
+      alert(mapAppError(err, t))
     } finally {
       setPdfSaving(false)
     }
@@ -390,7 +473,7 @@ export default function ContractDetailPage() {
       if (updated) setContract(updated)
     } catch (err) {
       setContract({ ...contract, include_damage_photos_in_pdf: previous })
-      alert(String(err))
+      alert(mapAppError(err, t))
     }
   }
 
@@ -405,6 +488,20 @@ export default function ContractDetailPage() {
             </Link>
           </div>
           <div className="toolbar-actions contract-header-actions">
+            <div className="contract-status-switch" role="group" aria-label={t.status}>
+              {CONTRACT_STATUSES.map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  className={`contract-status-btn contract-status-btn--${status}${currentStatus === status ? ' is-active' : ''}`}
+                  disabled={statusSaving}
+                  aria-pressed={currentStatus === status}
+                  onClick={() => changeContractStatus(status)}
+                >
+                  {t[status]}
+                </button>
+              ))}
+            </div>
             <Link className="btn btn-edit" to={`/contracts/${contract.id}/edit`}>
               <IconEdit size={16} />
               {t.edit}
@@ -475,7 +572,7 @@ export default function ContractDetailPage() {
                 </div>
                 <div className="info-item">
                   <span>{t.contractDate}</span>
-                  <strong>{display(contract.contract_date || contract.start_date)}</strong>
+                  <strong>{formatContractDate(contract.contract_date || contract.start_date)}</strong>
                 </div>
                 <div className="info-item">
                   <span>{t.contractCity}</span>
@@ -571,7 +668,7 @@ export default function ContractDetailPage() {
                 {contract.driver1_birth_date ? (
                   <div className="info-item">
                     <span>{t.birthDate}</span>
-                    <strong>{display(contract.driver1_birth_date)}</strong>
+                    <strong>{formatContractDate(contract.driver1_birth_date)}</strong>
                   </div>
                 ) : null}
                 {contract.driver1_passport_number ? (
@@ -592,33 +689,35 @@ export default function ContractDetailPage() {
             <div className="panel-body">
               <div className="contract-vehicle-layout">
                 <div className="contract-vehicle-hero">
-                  <div className="contract-vehicle-media">
-                    {carThumbUrl ? (
-                      <Link to={`/cars/${contract.car_id}`} className="contract-vehicle-photo-link" title={t.details}>
-                        <img className="contract-vehicle-photo" src={carThumbUrl} alt="" />
-                      </Link>
-                    ) : (
-                      <Link to={`/cars/${contract.car_id}`} className="contract-vehicle-placeholder" title={t.details}>
-                        <IconCar size={32} />
-                      </Link>
-                    )}
-                  </div>
+                  <div className="contract-vehicle-stack">
+                    <div className="contract-vehicle-media">
+                      {carThumbUrl ? (
+                        <Link to={`/cars/${contract.car_id}`} className="contract-vehicle-photo-link" title={t.details}>
+                          <img className="contract-vehicle-photo" src={carThumbUrl} alt="" />
+                        </Link>
+                      ) : (
+                        <Link to={`/cars/${contract.car_id}`} className="contract-vehicle-placeholder" title={t.details}>
+                          <IconCar size={32} />
+                        </Link>
+                      )}
+                    </div>
 
-                  <div className="contract-vehicle-identity">
-                    <span className="contract-vehicle-kicker">{t.car}</span>
-                    <Link className="contract-vehicle-name link-btn" to={`/cars/${contract.car_id}`}>
-                      {summary.brand} {summary.model}
-                    </Link>
-                    <span className="contract-vehicle-plate">{summary.plate || '—'}</span>
-                    {(car?.category || car?.year || car?.color) ? (
-                      <div className="contract-vehicle-meta">
-                        {car?.category ? (
-                          <span>{t[car.category as keyof typeof t] || car.category}</span>
-                        ) : null}
-                        {car?.year ? <span>{car.year}</span> : null}
-                        {car?.color ? <span>{car.color}</span> : null}
-                      </div>
-                    ) : null}
+                    <div className="contract-vehicle-identity">
+                      <span className="contract-vehicle-kicker">{t.car}</span>
+                      <Link className="contract-vehicle-name link-btn" to={`/cars/${contract.car_id}`}>
+                        {summary.brand} {summary.model}
+                      </Link>
+                      <span className="contract-vehicle-plate">{summary.plate || '—'}</span>
+                      {(car?.category || car?.year || car?.color) ? (
+                        <div className="contract-vehicle-meta">
+                          {car?.category ? (
+                            <span>{t[car.category as keyof typeof t] || car.category}</span>
+                          ) : null}
+                          {car?.year ? <span>{car.year}</span> : null}
+                          {car?.color ? <span>{car.color}</span> : null}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="contract-vehicle-dates">
@@ -626,7 +725,7 @@ export default function ContractDetailPage() {
                       <span>{t.departureAt}</span>
                       <strong>{formatContractDatetime(summary.departure)}</strong>
                       {contract.departure_place ? (
-                        <div className="muted-text">{contract.departure_place}</div>
+                        <div className="muted-text">{deliveryPlaceForDisplay(contract.departure_place, t)}</div>
                       ) : null}
                     </div>
                     <div className="contract-vehicle-date-card">
@@ -635,7 +734,7 @@ export default function ContractDetailPage() {
                         {formatContractDatetime(summary.returnAt)}
                       </strong>
                       {contract.return_place ? (
-                        <div className="muted-text">{contract.return_place}</div>
+                        <div className="muted-text">{deliveryPlaceForDisplay(contract.return_place, t)}</div>
                       ) : null}
                     </div>
                   </div>
@@ -668,7 +767,7 @@ export default function ContractDetailPage() {
                     <>
                       <div className="info-item">
                         <span>{t.extensionUntil}</span>
-                        <strong>{display(contract.extension_until)}</strong>
+                        <strong>{formatContractDate(contract.extension_until)}</strong>
                       </div>
                       <div className="info-item">
                         <span>{t.extensionDaysLabel}</span>
@@ -773,13 +872,13 @@ export default function ContractDetailPage() {
             </div>
           </div>
 
-          {contract.notes?.trim() ? (
+          {displayContractNotes(contract.notes) ? (
             <div className="panel">
               <div className="panel-header">
                 <h3>{t.notes}</h3>
               </div>
               <div className="panel-body detail-notes">
-                <p>{contract.notes}</p>
+                <p>{displayContractNotes(contract.notes)}</p>
               </div>
             </div>
           ) : null}
@@ -793,7 +892,7 @@ export default function ContractDetailPage() {
                 <div className="info-grid">
                   <div className="info-item">
                     <span>{t.returnDate}</span>
-                    <strong>{display(contract.returnInfo.returned_at)}</strong>
+                    <strong>{formatContractDatetime(contract.returnInfo.returned_at)}</strong>
                   </div>
                   <div className="info-item">
                     <span>{t.mileage}</span>
@@ -858,18 +957,19 @@ export default function ContractDetailPage() {
                     <th>{t.method}</th>
                     <th>{t.paidAt}</th>
                     <th>{t.source}</th>
+                    <th>{t.actions}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {payments.length === 0 ? (
                     <tr>
-                      <td colSpan={4}>
+                      <td colSpan={5}>
                         <EmptyState message={t.noData} />
                       </td>
                     </tr>
                   ) : (
                     payments.map((payment) => (
-                      <tr key={payment.id}>
+                      <tr key={`${payment.source || 'contract'}-${payment.id}`}>
                         <td>
                           <strong>{money(payment.amount)}</strong>
                         </td>
@@ -887,6 +987,26 @@ export default function ContractDetailPage() {
                           ) : (
                             '—'
                           )}
+                        </td>
+                        <td>
+                          <div className="row-actions">
+                            <button
+                              type="button"
+                              className="btn secondary sm icon-only"
+                              onClick={() => openPayEdit(payment)}
+                              title={t.edit}
+                            >
+                              <IconEdit size={15} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn danger sm icon-only"
+                              onClick={() => removePayment(payment)}
+                              title={t.delete}
+                            >
+                              <IconTrash size={15} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -1013,9 +1133,28 @@ export default function ContractDetailPage() {
       {activeTab === 'prolongation' && extendPreview && (
         <div className="panel admin-simple-panel">
           <div className="panel-header">
-            <h3>{t.contractTabExtension}</h3>
-            {extensionDaysTotal > 0 ? (
-              <span className="badge paid">+{extensionDaysTotal} j</span>
+            <div className="panel-header-title">
+              <h3>{t.contractTabExtension}</h3>
+              {extensionDaysTotal > 0 ? (
+                <span className="badge paid">+{extensionDaysTotal} j</span>
+              ) : null}
+            </div>
+            {canPay ? (
+              <button
+                type="button"
+                className="btn btn-register sm"
+                onClick={() =>
+                  openPayForm(
+                    extendPreview.newRemaining > 0
+                      ? extendPreview.newRemaining
+                      : summary?.remaining,
+                    true,
+                  )
+                }
+              >
+                <IconPlus size={15} />
+                {t.addPayment}
+              </button>
             ) : null}
           </div>
           <div className="panel-body">
@@ -1091,10 +1230,10 @@ export default function ContractDetailPage() {
           <form
             className="modal"
             onClick={(e) => e.stopPropagation()}
-            onSubmit={addPayment}
+            onSubmit={submitPayment}
           >
             <header>
-              <strong>{t.addPayment}</strong>
+              <strong>{payEditing ? t.edit : t.addPayment}</strong>
             </header>
             <div className="panel-body form-grid">
               <div className="field">

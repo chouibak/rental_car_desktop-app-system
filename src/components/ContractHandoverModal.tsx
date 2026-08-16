@@ -6,6 +6,7 @@ import { useToast } from '../context/ToastContext'
 import type { Car, Contract } from '../types'
 import type { ContractDamage } from '../utils/contracts'
 import { parseDamages } from '../utils/contracts'
+import { mapAppError } from '../utils/errors'
 
 export type HandoverMode = 'deliver' | 'departure-edit' | 'return' | 'return-edit'
 
@@ -178,7 +179,7 @@ export function ContractHandoverForm({
       const msg = String(err)
       if (msg.includes('RETURN_MILEAGE_INVALID')) setError(t.returnMileageInvalid)
       else if (msg.includes('INVALID_CONTRACT_STATUS')) setError(t.invalidContractStatus)
-      else setError(msg)
+      else setError(mapAppError(err, t))
     } finally {
       setSaving(false)
     }

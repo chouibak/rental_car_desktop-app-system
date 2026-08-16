@@ -1,6 +1,7 @@
 import type { Database } from 'sql.js'
 import { deleteChauffeurStorage, moveToChauffeurStorage } from './chauffeur-storage'
 import { deleteFileIfExists } from './storage'
+import { mergeDefined } from './input-utils'
 
 export type ChauffeurRecord = {
   id: number
@@ -221,11 +222,11 @@ export function createChauffeursApi(helpers: DbHelpers) {
       return created
     },
 
-    updateChauffeur(id: number, data: ChauffeurInput) {
+    updateChauffeur(id: number, data: Partial<ChauffeurInput>) {
       const existing = helpers.queryOne<ChauffeurRecord>('SELECT * FROM chauffeurs WHERE id = ?', [id])
       if (!existing) throw new Error('CHAUFFEUR_NOT_FOUND')
 
-      const normalized = normalizeChauffeurInput(data)
+      const normalized = normalizeChauffeurInput(mergeDefined(existing as ChauffeurInput, data))
       deleteRemovedPdfs(existing, normalized)
       const withPdfs = finalizePdfPaths(id, normalized)
       const t = helpers.now()
@@ -270,7 +271,10 @@ export function createChauffeursApi(helpers: DbHelpers) {
     },
 
     deleteChauffeur(id: number) {
-      const reserved = helpers.queryOne('SELECT id FROM reservations WHERE chauffeur_id = ? LIMIT 1', [id])
+      const reserved = helpers.queryOne(
+        `SELECT id FROM reservations WHERE chauffeur_id = ? AND status IN ('pending', 'confirmed') LIMIT 1`,
+        [id],
+      )
       if (reserved) throw new Error('CHAUFFEUR_HAS_RESERVATIONS')
 
       const chauffeur = helpers.queryOne<ChauffeurRecord>('SELECT * FROM chauffeurs WHERE id = ?', [id])

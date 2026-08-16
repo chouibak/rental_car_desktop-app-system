@@ -1,12 +1,21 @@
 import type { Database } from 'sql.js'
-import type { PaymentStatus, DepositStatus } from './reservations-db'
+import type { PaymentStatus } from './reservations-db'
 import { datePrefixEquals, localYmd, localYearMonth, roundMoney } from './local-date'
 import {
-  getReservationRentalPaid,
+  contractPaidExpr,
+  getReservationTotal,
   queryUnpaidTotal,
   syncAllReservationPaymentStatuses,
   syncReservationPaymentStatus,
 } from './payment-sync'
+import {
+  createReservationPaymentRow,
+  deleteReservationPaymentRow,
+  deleteReservationPaymentRows,
+  setReservationRentalPaid,
+  updateReservationPaymentRow,
+  type LedgerHelpers,
+} from './payment-ledger'
 
 export { syncAllReservationPaymentStatuses, syncReservationPaymentStatus }
 
@@ -29,7 +38,10 @@ export type ReservationPaymentRecord = {
 }
 
 export type ReservationPaymentListItem = ReservationPaymentRecord & {
-  reservation_reference: string
+  source: 'reservation' | 'contract'
+  contract_id?: number | null
+  contract_number?: string | null
+  reservation_reference: string | null
   customer_name: string
   car_name: string
   reservation_payment_status?: string
@@ -60,18 +72,9 @@ export type PaymentStats = {
   unpaid_total: number
 }
 
-type DbHelpers = {
-  queryAll: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => T[]
-  queryOne: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => T | null
-  run: (sql: string, params?: unknown[]) => void
-  runInsert: (sql: string, params?: unknown[]) => number
+type DbHelpers = LedgerHelpers & {
   lastId: () => number
-  now: () => string
 }
-
-const PAYMENT_TYPES: ReservationPaymentType[] = ['rental', 'deposit', 'deposit_return']
-const PAYMENT_METHODS: ReservationPaymentMethod[] = ['cash', 'card', 'bank_transfer']
-const PAYMENT_STATUSES: ReservationPaymentRecordStatus[] = ['completed', 'pending', 'cancelled']
 
 export function createReservationPaymentsSchema(db: Database) {
   db.run(`
@@ -92,106 +95,31 @@ export function createReservationPaymentsSchema(db: Database) {
   `)
 }
 
-function nextReference(helpers: DbHelpers) {
-  const year = new Date().getFullYear()
-  const prefix = `PAY-${year}-`
-  const row = helpers.queryOne<{ reference: string }>(
-    `SELECT reference FROM reservation_payments WHERE reference LIKE ? ORDER BY id DESC LIMIT 1`,
-    [`${prefix}%`],
-  )
-  const last = row?.reference ? Number(row.reference.split('-').pop()) : 0
-  return `${prefix}${String((last || 0) + 1).padStart(3, '0')}`
-}
-
-function normalizeInput(data: ReservationPaymentInput) {
-  const type = PAYMENT_TYPES.includes(data.type) ? data.type : 'rental'
-  const method = PAYMENT_METHODS.includes(data.method as ReservationPaymentMethod)
-    ? (data.method as ReservationPaymentMethod)
-    : 'cash'
-  const status = PAYMENT_STATUSES.includes(data.status as ReservationPaymentRecordStatus)
-    ? (data.status as ReservationPaymentRecordStatus)
-    : 'completed'
-  const amount = Number(data.amount)
-  if (!Number.isFinite(amount) || amount <= 0) throw new Error('INVALID_AMOUNT')
-
-  return {
-    reservation_id: Number(data.reservation_id),
-    type,
-    amount,
-    method,
-    status,
-    reference: data.reference?.trim() || '',
-    notes: data.notes?.trim() || '',
-    paid_at: data.paid_at?.trim() || new Date().toISOString().slice(0, 10),
-  }
-}
-
-function syncReservationStatuses(helpers: DbHelpers, reservationId: number) {
-  syncReservationPaymentStatus(helpers, reservationId)
-}
-
-/** Set total rental paid to an exact target by cancelling/removing or adding payments. */
-function adjustReservationRentalPaid(helpers: DbHelpers, reservationId: number, targetPaid: number) {
-  const reservation = helpers.queryOne<{ total_amount: number }>(
-    'SELECT total_amount FROM reservations WHERE id = ?',
-    [reservationId],
-  )
-  if (!reservation) throw new Error('RESERVATION_NOT_FOUND')
-
-  const target = Math.max(0, Math.min(targetPaid, reservation.total_amount))
-  const t = helpers.now()
-
-  let current = getReservationRentalPaid(helpers, reservationId)
-  while (current > target + 0.001) {
-    const reservationPayment = helpers.queryOne<{ id: number }>(
-      `SELECT id FROM reservation_payments
-       WHERE reservation_id = ? AND type = 'rental' AND status = 'completed'
-       ORDER BY id DESC LIMIT 1`,
-      [reservationId],
-    )
-    if (reservationPayment) {
-      helpers.run(
-        `UPDATE reservation_payments SET status = 'cancelled', updated_at = ? WHERE id = ?`,
-        [t, reservationPayment.id],
-      )
-      current = getReservationRentalPaid(helpers, reservationId)
-      continue
-    }
-
-    const contractPayment = helpers.queryOne<{ id: number }>(
-      `SELECT p.id FROM payments p
-       INNER JOIN contracts c ON c.id = p.contract_id AND c.deleted_at IS NULL
-       WHERE c.reservation_id = ?
-       ORDER BY p.id DESC LIMIT 1`,
-      [reservationId],
-    )
-    if (contractPayment) {
-      helpers.run('DELETE FROM payments WHERE id = ?', [contractPayment.id])
-      current = getReservationRentalPaid(helpers, reservationId)
-      continue
-    }
-
-    break
-  }
-
-  current = getReservationRentalPaid(helpers, reservationId)
-  const toAdd = target - current
-  if (toAdd > 0.001) {
-    const reference = nextReference(helpers)
-    helpers.runInsert(
-      `INSERT INTO reservation_payments (
-        reservation_id, type, amount, method, status, reference, notes, paid_at, created_at, updated_at
-      ) VALUES (?, 'rental', ?, 'cash', 'completed', ?, '', ?, ?, ?)`,
-      [reservationId, toAdd, reference, t.slice(0, 10), t, t],
-    )
-  }
-
-  syncReservationPaymentStatus(helpers, reservationId)
-}
+/** Newest first, on payment date then registration order. */
+const LEDGER_ORDER = `
+  ORDER BY datetime(replace(substr(COALESCE(paid_at, created_at, ''), 1, 19), 'T', ' ')) DESC,
+           datetime(replace(substr(COALESCE(created_at, paid_at, ''), 1, 19), 'T', ' ')) DESC,
+           id DESC
+`
 
 export function createReservationPaymentsApi(helpers: DbHelpers) {
-  const listSql = `
-    SELECT p.*,
+  /** One row shape for both ledgers, so the Paiements page can list them together. */
+  const reservationSelect = (where: string) => `
+    SELECT
+      p.id,
+      p.reservation_id,
+      p.type,
+      p.amount,
+      p.method,
+      p.status,
+      p.reference,
+      COALESCE(p.notes, '') as notes,
+      p.paid_at,
+      p.created_at,
+      p.updated_at,
+      'reservation' as source,
+      NULL as contract_id,
+      NULL as contract_number,
       r.reference as reservation_reference,
       r.payment_status as reservation_payment_status,
       cu.name as customer_name,
@@ -200,152 +128,134 @@ export function createReservationPaymentsApi(helpers: DbHelpers) {
     JOIN reservations r ON r.id = p.reservation_id
     JOIN customers cu ON cu.id = r.customer_id
     JOIN cars ca ON ca.id = r.car_id
+    WHERE ${where}
+  `
+
+  const contractSelect = (where: string) => `
+    SELECT
+      p.id,
+      c.reservation_id,
+      'rental' as type,
+      p.amount,
+      p.method,
+      p.status,
+      c.contract_number as reference,
+      COALESCE(p.note, '') as notes,
+      p.paid_at,
+      p.created_at,
+      COALESCE(p.updated_at, p.created_at) as updated_at,
+      'contract' as source,
+      p.contract_id,
+      c.contract_number,
+      r.reference as reservation_reference,
+      CASE
+        WHEN COALESCE(c.total_amount, 0) <= 0 THEN 'paid'
+        WHEN ${contractPaidExpr()} >= c.total_amount THEN 'paid'
+        WHEN ${contractPaidExpr()} > 0 THEN 'partial'
+        ELSE 'unpaid'
+      END as reservation_payment_status,
+      cu.name as customer_name,
+      ca.name as car_name
+    FROM payments p
+    JOIN contracts c ON c.id = p.contract_id
+    JOIN customers cu ON cu.id = c.client_id
+    JOIN cars ca ON ca.id = c.car_id
+    LEFT JOIN reservations r ON r.id = c.reservation_id
+    WHERE ${where}
   `
 
   return {
     listReservationPayments(filters?: ReservationPaymentFilters) {
-      let sql = `${listSql} WHERE r.status != 'cancelled'`
-      const params: unknown[] = []
+      const reservationWhere = [`r.status != 'cancelled'`]
+      const contractWhere = [`c.deleted_at IS NULL`, `c.status != 'cancelled'`]
+      const reservationParams: unknown[] = []
+      const contractParams: unknown[] = []
+      // Contract payments are always rental money, so a deposit filter excludes them.
+      const includeContracts = !filters?.type || filters.type === 'rental'
 
       if (filters?.q) {
-        sql += ` AND (p.reference LIKE ? OR r.reference LIKE ? OR cu.name LIKE ? OR ca.name LIKE ?)`
         const like = `%${filters.q}%`
-        params.push(like, like, like, like)
+        reservationWhere.push('(p.reference LIKE ? OR r.reference LIKE ? OR cu.name LIKE ? OR ca.name LIKE ?)')
+        reservationParams.push(like, like, like, like)
+        contractWhere.push(
+          `(c.contract_number LIKE ? OR cu.name LIKE ? OR ca.name LIKE ? OR COALESCE(p.note, '') LIKE ? OR COALESCE(r.reference, '') LIKE ?)`,
+        )
+        contractParams.push(like, like, like, like, like)
       }
       if (filters?.reservation_id) {
-        sql += ' AND p.reservation_id = ?'
-        params.push(filters.reservation_id)
+        reservationWhere.push('p.reservation_id = ?')
+        reservationParams.push(filters.reservation_id)
+        contractWhere.push('c.reservation_id = ?')
+        contractParams.push(filters.reservation_id)
       }
       if (filters?.type) {
-        sql += ' AND p.type = ?'
-        params.push(filters.type)
+        reservationWhere.push('p.type = ?')
+        reservationParams.push(filters.type)
       }
       if (filters?.status) {
-        sql += ' AND p.status = ?'
-        params.push(filters.status)
+        reservationWhere.push('p.status = ?')
+        reservationParams.push(filters.status)
+        contractWhere.push('p.status = ?')
+        contractParams.push(filters.status)
       }
 
-      sql += ' ORDER BY p.paid_at DESC, p.id DESC'
-      return helpers.queryAll<ReservationPaymentListItem>(sql, params)
+      const reservationSql = reservationSelect(reservationWhere.join(' AND '))
+      const sql = includeContracts
+        ? `SELECT * FROM (${reservationSql} UNION ALL ${contractSelect(contractWhere.join(' AND '))}) combined ${LEDGER_ORDER}`
+        : `${reservationSql} ${LEDGER_ORDER}`
+
+      return helpers.queryAll<ReservationPaymentListItem>(
+        sql,
+        includeContracts ? [...reservationParams, ...contractParams] : reservationParams,
+      )
     },
 
     getReservationPayment(id: number) {
-      return helpers.queryOne<ReservationPaymentListItem>(`${listSql} WHERE p.id = ?`, [id])
+      return helpers.queryOne<ReservationPaymentListItem>(reservationSelect('p.id = ?'), [id])
     },
 
     createReservationPayment(data: ReservationPaymentInput) {
-      const reservation = helpers.queryOne('SELECT id FROM reservations WHERE id = ?', [data.reservation_id])
-      if (!reservation) throw new Error('RESERVATION_NOT_FOUND')
-
-      const normalized = normalizeInput(data)
-      const t = helpers.now()
-      const reference = normalized.reference || nextReference(helpers)
-
-      const id = helpers.runInsert(
-        `INSERT INTO reservation_payments (
-          reservation_id, type, amount, method, status, reference, notes, paid_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          normalized.reservation_id,
-          normalized.type,
-          normalized.amount,
-          normalized.method,
-          normalized.status,
-          reference,
-          normalized.notes,
-          normalized.paid_at,
-          t,
-          t,
-        ],
-      )
-
-      syncReservationStatuses(helpers, normalized.reservation_id)
+      const id = createReservationPaymentRow(helpers, data)
       const row = this.getReservationPayment(id)
       if (!row) throw new Error('PAYMENT_CREATE_FAILED')
       return row
     },
 
     updateReservationPayment(id: number, data: Partial<ReservationPaymentInput>) {
-      const existing = helpers.queryOne<ReservationPaymentRecord>(
-        'SELECT * FROM reservation_payments WHERE id = ?',
-        [id],
-      )
-      if (!existing) throw new Error('PAYMENT_NOT_FOUND')
-
-      const normalized = normalizeInput({
-        reservation_id: existing.reservation_id,
-        type: data.type ?? existing.type,
-        amount: data.amount ?? existing.amount,
-        method: data.method ?? existing.method,
-        status: data.status ?? existing.status,
-        reference: data.reference ?? existing.reference,
-        notes: data.notes ?? existing.notes,
-        paid_at: data.paid_at ?? existing.paid_at,
-      })
-
-      const t = helpers.now()
-      helpers.run(
-        `UPDATE reservation_payments
-         SET type = ?, amount = ?, method = ?, status = ?, reference = ?, notes = ?, paid_at = ?, updated_at = ?
-         WHERE id = ?`,
-        [
-          normalized.type,
-          normalized.amount,
-          normalized.method,
-          normalized.status,
-          normalized.reference,
-          normalized.notes,
-          normalized.paid_at,
-          t,
-          id,
-        ],
-      )
-
-      syncReservationStatuses(helpers, existing.reservation_id)
+      updateReservationPaymentRow(helpers, id, data)
       return this.getReservationPayment(id)
     },
 
     deleteReservationPayment(id: number) {
-      const existing = helpers.queryOne<ReservationPaymentRecord>(
-        'SELECT * FROM reservation_payments WHERE id = ?',
-        [id],
-      )
-      if (!existing) throw new Error('PAYMENT_NOT_FOUND')
-
-      helpers.run('DELETE FROM reservation_payments WHERE id = ?', [id])
-      syncReservationStatuses(helpers, existing.reservation_id)
+      deleteReservationPaymentRow(helpers, id)
       return { ok: true }
     },
 
     deleteReservationPaymentsByReservation(reservationId: number) {
-      helpers.run('DELETE FROM reservation_payments WHERE reservation_id = ?', [reservationId])
-      syncReservationStatuses(helpers, reservationId)
+      deleteReservationPaymentRows(helpers, reservationId)
       return { ok: true }
     },
 
+    /** Payment status wizard on the reservation form: force paid cash to match the choice. */
     applyReservationPaymentStatus(
       reservationId: number,
       payment_status: PaymentStatus,
       partialAmount?: number,
     ) {
-      const reservation = helpers.queryOne<{ total_amount: number }>(
-        'SELECT total_amount FROM reservations WHERE id = ?',
-        [reservationId],
-      )
-      if (!reservation) throw new Error('RESERVATION_NOT_FOUND')
+      const total = getReservationTotal(helpers, reservationId)
 
       let targetPaid = 0
       if (payment_status === 'paid') {
-        targetPaid = reservation.total_amount
+        targetPaid = total
       } else if (payment_status === 'partial') {
         const amount = Number(partialAmount)
-        if (!Number.isFinite(amount) || amount <= 0 || amount >= reservation.total_amount) {
+        if (!Number.isFinite(amount) || amount <= 0 || amount >= total) {
           throw new Error('INVALID_PARTIAL_AMOUNT')
         }
         targetPaid = amount
       }
 
-      adjustReservationRentalPaid(helpers, reservationId, targetPaid)
+      setReservationRentalPaid(helpers, reservationId, targetPaid)
       return { ok: true }
     },
 
@@ -353,43 +263,35 @@ export function createReservationPaymentsApi(helpers: DbHelpers) {
       const today = localYmd()
       const monthPrefix = localYearMonth()
 
-      const todayReservation = helpers.queryOne<{ total: number; count: number }>(
-        `SELECT COALESCE(SUM(p.amount), 0) as total, COUNT(*) as count
-         FROM reservation_payments p
-         INNER JOIN reservations r ON r.id = p.reservation_id AND r.status != 'cancelled'
-         WHERE p.type = 'rental' AND p.status = 'completed' AND ${datePrefixEquals('p.paid_at', today)}`,
-        [today],
-      )
+      const cashIn = (prefix: string) => {
+        const reservation = helpers.queryOne<{ total: number; count: number }>(
+          `SELECT COALESCE(SUM(p.amount), 0) as total, COUNT(*) as count
+           FROM reservation_payments p
+           INNER JOIN reservations r ON r.id = p.reservation_id AND r.status != 'cancelled'
+           WHERE p.type = 'rental' AND p.status = 'completed' AND ${datePrefixEquals('p.paid_at', prefix)}`,
+          [prefix],
+        )
+        const contract = helpers.queryOne<{ total: number; count: number }>(
+          `SELECT COALESCE(SUM(p.amount), 0) as total, COUNT(*) as count
+           FROM payments p
+           INNER JOIN contracts c ON c.id = p.contract_id AND c.deleted_at IS NULL AND c.status != 'cancelled'
+           WHERE p.status = 'completed' AND ${datePrefixEquals('p.paid_at', prefix)}`,
+          [prefix],
+        )
+        return {
+          total: roundMoney((reservation?.total ?? 0) + (contract?.total ?? 0)),
+          count: (reservation?.count ?? 0) + (contract?.count ?? 0),
+        }
+      }
 
-      const todayContract = helpers.queryOne<{ total: number; count: number }>(
-        `SELECT COALESCE(SUM(p.amount), 0) as total, COUNT(*) as count
-         FROM payments p
-         INNER JOIN contracts c ON c.id = p.contract_id AND c.deleted_at IS NULL
-         WHERE ${datePrefixEquals('p.paid_at', today)}`,
-        [today],
-      )
-
-      const monthReservation = helpers.queryOne<{ total: number }>(
-        `SELECT COALESCE(SUM(p.amount), 0) as total
-         FROM reservation_payments p
-         INNER JOIN reservations r ON r.id = p.reservation_id AND r.status != 'cancelled'
-         WHERE p.type = 'rental' AND p.status = 'completed' AND ${datePrefixEquals('p.paid_at', monthPrefix)}`,
-        [monthPrefix],
-      )
-
-      const monthContract = helpers.queryOne<{ total: number }>(
-        `SELECT COALESCE(SUM(p.amount), 0) as total
-         FROM payments p
-         INNER JOIN contracts c ON c.id = p.contract_id AND c.deleted_at IS NULL
-         WHERE ${datePrefixEquals('p.paid_at', monthPrefix)}`,
-        [monthPrefix],
-      )
+      const todayCash = cashIn(today)
+      const monthCash = cashIn(monthPrefix)
 
       return {
-        today_revenue: roundMoney((todayReservation?.total ?? 0) + (todayContract?.total ?? 0)),
-        today_payments_count: (todayReservation?.count ?? 0) + (todayContract?.count ?? 0),
-        month_revenue: roundMoney((monthReservation?.total ?? 0) + (monthContract?.total ?? 0)),
-        unpaid_total: roundMoney(queryUnpaidTotal(helpers)),
+        today_revenue: todayCash.total,
+        today_payments_count: todayCash.count,
+        month_revenue: monthCash.total,
+        unpaid_total: queryUnpaidTotal(helpers),
       }
     },
   }

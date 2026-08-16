@@ -10,13 +10,14 @@ type InvoiceBreakdown = {
   total_ht: number
   total_vat: number
   total_ttc: number
-  lines: Array<{ label: string; amount: number }>
+  lines: Array<{ label: string; amount: number; days?: number }>
 }
 
 const PAGE = { w: 595.28, h: 841.89, m: 22 }
 const CONTENT_W = PAGE.w - PAGE.m * 2
 const SECTION_GAP = 10
 const COL_GAP = 6
+const FOOTER_H = 40
 
 function footerIdValue(value?: string) {
   const text = String(value ?? '').trim()
@@ -52,10 +53,10 @@ const DAMAGE_LABELS: Record<string, string> = {
   C: 'Cassure',
 }
 
-const PHOTO_GRID_COLS = 4
-const PHOTO_CELL_H = 50
-const PHOTO_LABEL_H = 9
-const PHOTO_IMG_MAX_H = 34
+const PHOTO_GRID_COLS = 2
+const PHOTO_CELL_H = 168
+const PHOTO_LABEL_H = 14
+const PHOTO_IMG_MAX_H = 148
 
 const FUEL_FILL: Record<string, number> = {
   vide: 0,
@@ -97,8 +98,8 @@ function money(n: number, currency = 'DH') {
   const abs = Math.abs(value)
   const fixed = abs.toFixed(2)
   const [intPart, decPart] = fixed.split('.')
-  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
-  return `${negative ? '-' : ''}${grouped},${decPart} ${currency}`
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return `${currency} ${negative ? '-' : ''}${grouped}.${decPart}`
 }
 
 function fmtDate(value?: string | null) {
@@ -115,6 +116,47 @@ function fmtDatetime(value?: string | null) {
   const date = d.toLocaleDateString('fr-FR')
   const time = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
   return `${date} ${time}`
+}
+
+function pdfSafe(value: unknown) {
+  const text = String(value ?? '')
+    .replace(/[\u2013\u2014]/g, '-')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+  // Helvetica is WinAnsi — Arabic/other scripts become garbage glyphs.
+  return Array.from(text)
+    .map((ch) => (ch.charCodeAt(0) <= 255 ? ch : ''))
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function placeLabelFr(value?: string | null) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const folded = raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/['’]/g, "'")
+  const labels: Record<string, string> = {
+    agency: "À l'agence",
+    airport: 'Aéroport',
+    hotel: 'Hôtel',
+    "a l'agence": "À l'agence",
+    agence: "À l'agence",
+    aeroport: 'Aéroport',
+    'في الوكالة': "À l'agence",
+    الوكالة: "À l'agence",
+    المطار: 'Aéroport',
+    الفندق: 'Hôtel',
+  }
+  return pdfSafe(labels[raw] ?? labels[folded] ?? raw)
+}
+
+function withPlace(datetime: string, place?: string | null) {
+  const label = placeLabelFr(place)
+  return label ? `${datetime} - ${label}` : datetime
 }
 
 function val(value: unknown) {
@@ -405,9 +447,9 @@ function drawVehicleEquipment(doc: InstanceType<typeof PDFDocument>, x: number, 
     doc.font('Helvetica').fontSize(7).text(valStr || '', valX, innerY + row * lineH)
   }
 
-  textL('Date et heure de départ :', `${fmtDatetime(contract.departure_at || contract.start_date)}${contract.departure_place ? ` — ${contract.departure_place}` : ''}`, 1.5)
+  textL('Date et heure de départ :', withPlace(fmtDatetime(contract.departure_at || contract.start_date), contract.departure_place), 1.5)
   textL('KM de départ :', contract.departure_mileage != null ? String(contract.departure_mileage) : '—', 2.5)
-  textL('Date et heure de retour :', `${fmtDatetime(contract.return_at || contract.end_date)}${contract.return_place ? ` — ${contract.return_place}` : ''}`, 3.5)
+  textL('Date et heure de retour :', withPlace(fmtDatetime(contract.return_at || contract.end_date), contract.return_place), 3.5)
   textL('KM de retour :', contract.return_mileage != null ? String(contract.return_mileage) : '—', 4.5)
 
   doc.font('Helvetica-Bold').fontSize(7).text('Nb de jours facturés :', x + 4, innerY + 5.5 * lineH)
@@ -482,8 +524,10 @@ function drawDamagePhotoGrid(
     const partLabel = PART_LABELS[damage.part] || damage.part
     const typeLabel = DAMAGE_LABELS[damage.type] || damage.type
 
-    doc.font('Helvetica-Bold').fontSize(5).fillColor('#111')
-    doc.text(`${partLabel} — ${typeLabel}`, cx + 3, cy + 1, { width: cellW - 6, align: 'left', lineBreak: false })
+    doc.save()
+    doc.rect(cx + 1, cy, cellW - 2, PHOTO_CELL_H - 2).clip()
+    doc.font('Helvetica-Bold').fontSize(8).fillColor('#111')
+    doc.text(`${partLabel} — ${typeLabel}`, cx + 3, cy + 2, { width: cellW - 6, align: 'left', lineBreak: false })
 
     try {
       doc.image(damage.photo!, cx + 3, cy + PHOTO_LABEL_H + 1, {
@@ -492,21 +536,16 @@ function drawDamagePhotoGrid(
     } catch {
       // skip unreadable image
     }
+    doc.restore()
   })
 }
 
 function drawVehicleState(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, contract: ContractRecord) {
-  const baseH = 108
-  const includePhotos = Number(contract.include_damage_photos_in_pdf) === 1
-  const departureDamages = parseJsonArray<DamageItem>(contract.departure_damages)
-  const returnDamages = parseJsonArray<DamageItem>(contract.return_damages)
-  const departurePhotos = includePhotos ? damagePhotoItems(departureDamages) : []
-  const returnPhotos = includePhotos ? damagePhotoItems(returnDamages) : []
-  const photoRows = Math.max(photoGridRows(departurePhotos.length), photoGridRows(returnPhotos.length))
-  const photoBlockH = photoRows > 0 ? photoRows * PHOTO_CELL_H + 4 : 0
-  const h = baseH + photoBlockH
+  const h = 108
   const w2 = (w - COL_GAP) / 2
   const rightX = x + w2 + COL_GAP
+  const departureDamages = parseJsonArray<DamageItem>(contract.departure_damages)
+  const returnDamages = parseJsonArray<DamageItem>(contract.return_damages)
 
   strokeBox(doc, x, y, w2, h)
   strokeBox(doc, rightX, y, w2, h)
@@ -527,19 +566,62 @@ function drawVehicleState(doc: InstanceType<typeof PDFDocument>, x: number, y: n
     doc.text('E - Éclat', bx + 6, legY + 20)
     doc.text('C - Cassure', bx + 6, legY + 30)
 
-    drawCarDiagram(doc, bx + 46, y + 14, w2 - 54, baseH - 42, block.damages)
-    drawFuelGauge(doc, bx + 6, y + baseH - 26, w2 - 12, block.fuel)
+    drawCarDiagram(doc, bx + 46, y + 14, w2 - 54, h - 42, block.damages)
+    drawFuelGauge(doc, bx + 6, y + h - 26, w2 - 12, block.fuel)
   })
 
-  if (photoBlockH > 0) {
-    const photoY = y + baseH
-    doc.moveTo(x, photoY).lineTo(x + w2, photoY).stroke('#222')
-    doc.moveTo(rightX, photoY).lineTo(rightX + w2, photoY).stroke('#222')
-    if (departurePhotos.length > 0) drawDamagePhotoGrid(doc, x, photoY + 3, w2, departurePhotos)
-    if (returnPhotos.length > 0) drawDamagePhotoGrid(doc, rightX, photoY + 3, w2, returnPhotos)
+  return h
+}
+
+function collectDamagePhotos(contract: ContractRecord) {
+  if (Number(contract.include_damage_photos_in_pdf) !== 1) {
+    return { departure: [] as DamageItem[], returnPhotos: [] as DamageItem[] }
+  }
+  return {
+    departure: damagePhotoItems(parseJsonArray<DamageItem>(contract.departure_damages)),
+    returnPhotos: damagePhotoItems(parseJsonArray<DamageItem>(contract.return_damages)),
+  }
+}
+
+function drawDamagePhotosAnnex(
+  doc: InstanceType<typeof PDFDocument>,
+  contract: ContractRecord,
+  settings: Record<string, string>,
+) {
+  const { departure, returnPhotos } = collectDamagePhotos(contract)
+  if (departure.length === 0 && returnPhotos.length === 0) return
+
+  doc.addPage({ size: 'A4', margin: 0 })
+  const x = PAGE.m
+  let y = PAGE.m
+
+  sectionBar(doc, x, y, CONTENT_W, 'Photos des dommages')
+  y += 20
+  doc.font('Helvetica').fontSize(8).fillColor('#333')
+  doc.text(`Contrat ${contract.contract_number || ''}`.trim(), x, y, { width: CONTENT_W })
+  y += 16
+
+  const blocks = [
+    { title: 'À la livraison', photos: departure },
+    { title: 'À la reprise', photos: returnPhotos },
+  ]
+
+  for (const block of blocks) {
+    if (block.photos.length === 0) continue
+    if (y + 28 + PHOTO_CELL_H > PAGE.h - PAGE.m - FOOTER_H - 8) {
+      drawFooter(doc, x, PAGE.h - PAGE.m - FOOTER_H, CONTENT_W, settings)
+      doc.addPage({ size: 'A4', margin: 0 })
+      y = PAGE.m
+    }
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#111')
+    doc.text(block.title, x, y)
+    y += 14
+    strokeBox(doc, x, y, CONTENT_W, photoGridRows(block.photos.length) * PHOTO_CELL_H + 8)
+    drawDamagePhotoGrid(doc, x + 4, y + 4, CONTENT_W - 8, block.photos)
+    y += photoGridRows(block.photos.length) * PHOTO_CELL_H + 18
   }
 
-  return h
+  drawFooter(doc, x, PAGE.h - PAGE.m - FOOTER_H, CONTENT_W, settings)
 }
 
 function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, contract: ContractRecord & { client_name?: string; paid_amount?: number }, breakdown: InvoiceBreakdown) {
@@ -596,14 +678,15 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
     const amountHt = vatRate > 0 ? amountTtc / (1 + vatRate / 100) : amountTtc
     const amountVat = amountTtc - amountHt
     const isLocation = line.label === 'Location'
+    const lineDays = Number(line.days ?? (isLocation ? qty : 0))
     const designation = isLocation
-      ? `Location ${vehicleLabel || 'véhicule'} (${qty} j)`
+      ? `Location ${vehicleLabel || 'véhicule'} (${lineDays} j)`
       : line.label
 
     const rowValues = [
       designation,
-      isLocation ? String(qty) : '—',
-      isLocation && qty > 0 ? money(amountHt / qty) : '—',
+      lineDays > 0 ? String(lineDays) : '—',
+      lineDays > 0 ? money(amountHt / lineDays) : '—',
       money(amountHt),
       vatApplies ? `${vatRate} %` : '—',
       vatApplies ? money(amountVat) : '—',
@@ -684,7 +767,7 @@ function drawSignatures(doc: InstanceType<typeof PDFDocument>, x: number, y: num
   const headerH = 14
   const partyRowH = 14
   const subHeaderH = 12
-  const legalH = 12
+  const legalH = 18
   const sigAreaH = 56
   const h = headerH + partyRowH + subHeaderH + sigAreaH + legalH
 
@@ -768,11 +851,10 @@ function drawFooter(doc: InstanceType<typeof PDFDocument>, x: number, y: number,
     settings.legal_mention_fr?.trim() ||
     'Chaque dommage touche la société pendant la période de location ; le locataire sera exposé à la responsabilité administrative et judiciaire jusqu\'à la décision finale, ainsi qu\'au paiement de tous les frais résultants.'
 
-  const footerH = 32
-  strokeBox(doc, x, y, w, footerH)
+  strokeBox(doc, x, y, w, FOOTER_H)
 
   doc.font('Helvetica').fontSize(4.5).fillColor('#111')
-  doc.text(legalText, x + 6, y + 4, { width: w - 12, align: 'left', lineGap: 0 })
+  doc.text(legalText, x + 6, y + 4, { width: w - 12, align: 'left', lineGap: 0, height: 16 })
 
   const ids = [
     ['RC', settings.company_rc],
@@ -782,7 +864,7 @@ function drawFooter(doc: InstanceType<typeof PDFDocument>, x: number, y: number,
     ['ICE', settings.company_ice],
   ] as const
 
-  const idsY = y + 16
+  const idsY = y + 22
   const colW = w / ids.length
   ids.forEach(([label, value], index) => {
     const cx = x + index * colW
@@ -813,8 +895,8 @@ export function buildContractPdf(
     y += drawInvoice(doc, x, y, CONTENT_W, contract, breakdown) + SECTION_GAP
     drawSignatures(doc, x, y, CONTENT_W)
 
-    const footerY = PAGE.h - PAGE.m - 32
-    drawFooter(doc, x, footerY, CONTENT_W, settings)
+    drawFooter(doc, x, PAGE.h - PAGE.m - FOOTER_H, CONTENT_W, settings)
+    drawDamagePhotosAnnex(doc, contract, settings)
     drawConditionsVerso(doc, settings)
 
     doc.end()

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { fileBasename } from '../utils/file'
+import { mapAppError } from '../utils/errors'
 import type { Customer } from '../types'
 
 type DocKey = 'cin' | 'passport' | 'license'
@@ -62,9 +63,10 @@ export default function CustomerFormPage() {
         passport_pdf_path: fileBasename(customer.passport_pdf_path),
         license_pdf_path: fileBasename(customer.license_pdf_path),
       })
-      setLoading(false)
     })
-  }, [isEdit, customerId, navigate])
+      .catch(() => setError(t.loadFailed))
+      .finally(() => setLoading(false))
+  }, [isEdit, customerId, navigate, t])
 
   const docMeta = useMemo(
     () =>
@@ -82,7 +84,8 @@ export default function CustomerFormPage() {
     if (!picked) return
     const pathKey = `${docKey}_pdf_path` as keyof Customer
     const oldPath = form[pathKey] as string
-    if (oldPath && oldPath !== picked.path) await window.api.deleteCustomerFile(oldPath)
+    // On a saved customer the main process removes the replaced file once the row is updated.
+    if (!isEdit && oldPath && oldPath !== picked.path) await window.api.deleteCustomerFile(oldPath)
 
     const nextForm = { ...form, [pathKey]: picked.path }
     setForm(nextForm)
@@ -109,21 +112,27 @@ export default function CustomerFormPage() {
   const onRemoveDocument = async (docKey: DocKey) => {
     const pathKey = `${docKey}_pdf_path` as keyof Customer
     const oldPath = form[pathKey] as string
-    if (oldPath) await window.api.deleteCustomerFile(oldPath)
+    const previousForm = form
     const nextForm = { ...form, [pathKey]: '' }
     setForm(nextForm)
     setDocFileNames((names) => ({ ...names, [pathKey]: '' }))
 
     if (isEdit && customerId && oldPath) {
+      // Delete the file only through the update, so a failed save keeps the document.
       try {
         await window.api.updateCustomer(customerId, {
           ...nextForm,
           name: nextForm.name?.trim() || '',
         })
       } catch {
+        setForm(previousForm)
+        setDocFileNames((names) => ({ ...names, [pathKey]: fileBasename(oldPath) }))
         setError(t.cannotSaveDocument)
       }
+      return
     }
+
+    if (oldPath) await window.api.deleteCustomerFile(oldPath)
   }
 
   const onOpenDocument = async (filePath: string) => {
@@ -146,7 +155,7 @@ export default function CustomerFormPage() {
       else await window.api.createCustomer(payload)
       navigate('/customers')
     } catch (err) {
-      setError(String(err))
+      setError(mapAppError(err, t))
     } finally {
       setSaving(false)
     }

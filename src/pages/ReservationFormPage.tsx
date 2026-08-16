@@ -83,6 +83,7 @@ export default function ReservationFormPage() {
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [loadedTotal, setLoadedTotal] = useState(0)
 
   useEffect(() => {
     Promise.all([
@@ -134,6 +135,7 @@ export default function ReservationFormPage() {
         payment_status: paymentStatus,
         paid_amount: paid,
       })
+      setLoadedTotal(Number(data.total_amount) || 0)
       setLoading(false)
 
       if (data.chauffeur_id) {
@@ -157,13 +159,15 @@ export default function ReservationFormPage() {
     setForm((f) => ({ ...f, car_id: carId, daily_rate: car?.price_per_day ?? 0 }))
   }
 
+  const billedTotal = Math.max(preview.total, loadedTotal)
+
   const onPaymentStatusChange = (payment_status: PaymentStatus) => {
     setForm((f) => ({
       ...f,
       payment_status,
       paid_amount:
         payment_status === 'paid'
-          ? preview.total
+          ? billedTotal
           : payment_status === 'partial'
             ? f.paid_amount || 0
             : 0,
@@ -184,7 +188,7 @@ export default function ReservationFormPage() {
     }
 
     if (form.payment_status === 'partial') {
-      if (form.paid_amount <= 0 || form.paid_amount >= preview.total) {
+      if (form.paid_amount <= 0 || form.paid_amount >= billedTotal) {
         setError(t.invalidPartialAmount)
         return
       }
@@ -382,20 +386,20 @@ export default function ReservationFormPage() {
                 type="number"
                 min={0.01}
                 step="0.01"
-                max={Math.max(preview.total - 0.01, 0.01)}
+                max={Math.max(billedTotal - 0.01, 0.01)}
                 required
                 value={form.paid_amount || ''}
                 onChange={(e) => setForm((f) => ({ ...f, paid_amount: Number(e.target.value) }))}
               />
               <span className="muted-text">
-                {t.remaining}: {money(Math.max(0, preview.total - (form.paid_amount || 0)))}
+                {t.remaining}: {money(Math.max(0, billedTotal - (form.paid_amount || 0)))}
               </span>
             </div>
           )}
           {form.payment_status === 'paid' && (
             <div className="field">
               <label>{t.amountPaid}</label>
-              <input className="input" value={money(preview.total)} readOnly />
+              <input className="input" value={money(billedTotal)} readOnly />
             </div>
           )}
           <div className="field full">

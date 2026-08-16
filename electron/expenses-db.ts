@@ -1,7 +1,7 @@
 import type { Database } from 'sql.js'
 import { deleteFileIfExists } from './storage'
 import { deleteExpenseStorage, moveToExpenseStorage } from './expense-storage'
-import { datePrefixEquals, localYearMonth } from './local-date'
+import { datePrefixEquals, localYmd, localYearMonth } from './local-date'
 
 export type ExpenseCategory =
   | 'fuel'
@@ -154,7 +154,7 @@ function normalizeInput(data: ExpenseInput) {
     title,
     category,
     amount,
-    expense_date: data.expense_date?.trim() || new Date().toISOString().slice(0, 10),
+    expense_date: data.expense_date?.trim() || localYmd(),
     payment_method,
     receipt_path: data.receipt_path?.trim() || '',
     notes: data.notes?.trim() || '',
@@ -287,6 +287,11 @@ export function createExpensesApi(helpers: DbHelpers) {
 
       const updated = this.getExpense(id)
       if (!updated) throw new Error('EXPENSE_NOT_FOUND')
+      helpers.run(
+        `UPDATE car_vidanges SET cost = ?, performed_at = ?, notes = ?
+         WHERE expense_id = ?`,
+        [normalized.amount, normalized.expense_date, normalized.notes, id],
+      )
       return updated
     },
 
@@ -322,12 +327,13 @@ export function createExpensesApi(helpers: DbHelpers) {
         monthParams,
       )
 
+      // The breakdown sits next to the filtered table, so it follows the filters, not the month.
       const by_category = helpers
         .queryAll<{ category: string; amount: number }>(
           `SELECT e.category, COALESCE(SUM(e.amount), 0) as amount
-           FROM expenses e ${monthClauses}
+           FROM expenses e ${where}
            GROUP BY e.category ORDER BY amount DESC`,
-          monthParams,
+          params,
         )
         .map((row) => ({ category: row.category, amount: row.amount }))
 

@@ -18,19 +18,52 @@ export function deliveryLocationOptions(t: Dict) {
 
 export function deliveryLocationLabel(value: string | null | undefined, t: Dict) {
   if (!value?.trim()) return '—'
-  const key = DELIVERY_LABEL_KEYS[value as DeliveryLocation]
-  return key ? t[key] : value
+  return deliveryPlaceForDisplay(value, t) || '—'
+}
+
+export function deliveryPlaceForDisplay(value: string | null | undefined, t: Dict) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const normalized = normalizeDeliveryLocation(raw)
+  return normalized ? t[DELIVERY_LABEL_KEYS[normalized]] : raw
+}
+
+const PLACE_FR: Record<DeliveryLocation, string> = {
+  agency: "À l'agence",
+  airport: 'Aéroport',
+  hotel: 'Hôtel',
+}
+
+/** Store a PDF-safe French label for known pickup/return places. */
+export function deliveryPlaceForStorage(value: string | null | undefined) {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const normalized = normalizeDeliveryLocation(raw)
+  return normalized ? PLACE_FR[normalized] : raw
 }
 
 export function normalizeDeliveryLocation(value: string | null | undefined): DeliveryLocation | '' {
   if (!value) return ''
-  if (DELIVERY_LOCATIONS.includes(value as DeliveryLocation)) return value as DeliveryLocation
+  const raw = value.trim()
+  if (DELIVERY_LOCATIONS.includes(raw as DeliveryLocation)) return raw as DeliveryLocation
+
+  const folded = raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/['’]/g, "'")
+
   const legacy: Record<string, DeliveryLocation> = {
-    "à l'agence": 'agency',
-    'aeroport': 'airport',
-    'aéroport': 'airport',
-    'hotel': 'hotel',
-    'hôtel': 'hotel',
+    agency: 'agency',
+    airport: 'airport',
+    hotel: 'hotel',
+    "a l'agence": 'agency',
+    agence: 'agency',
+    aeroport: 'airport',
+    'في الوكالة': 'agency',
+    'الوكالة': 'agency',
+    'المطار': 'airport',
+    'الفندق': 'hotel',
   }
-  return legacy[value.trim().toLowerCase()] ?? ''
+  return legacy[folded] ?? legacy[raw] ?? ''
 }

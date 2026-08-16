@@ -1,10 +1,10 @@
 import { FormEvent, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ContractVehicleStateSection, DriverFields } from '../components/ContractFormSections'
-import { IconChevronDown } from '../components/icons'
 import { PageHeader } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { useToast } from '../context/ToastContext'
+import type { Dict } from '../i18n'
 import type { Car, Contract, Customer, Chauffeur, Reservation } from '../types'
 import {
   CONTRACT_STATUSES,
@@ -20,24 +20,34 @@ import {
   parseEquipment,
   toIsoDatetime,
   toLocalDatetimeValue,
+  isLiveContract,
   type ContractDamage,
 } from '../utils/contracts'
-import { deliveryLocationLabel } from '../utils/reservation'
+import { deliveryPlaceForDisplay, deliveryPlaceForStorage } from '../utils/reservation'
+import { mapAppError } from '../utils/errors'
 
-function ContractSection({ title, subtitle, children, grid = 'form-grid' }: { title: string; subtitle?: string; children: ReactNode; grid?: string }) {
+function ContractSection({
+  step,
+  title,
+  subtitle,
+  children,
+}: {
+  step?: number
+  title: string
+  subtitle?: string
+  children: ReactNode
+}) {
   return (
-    <details className="contract-section panel" open>
-      <summary className="contract-section-title">
-        <div className="contract-section-heading">
-          <div>
-            <strong>{title}</strong>
-            {subtitle && <p className="contract-section-subtitle">{subtitle}</p>}
-          </div>
-          <IconChevronDown size={18} className="contract-section-chevron" />
+    <section className="panel contract-admin-section">
+      <header className="contract-admin-head">
+        {step != null ? <span className="contract-admin-step">{step}</span> : null}
+        <div className="contract-admin-titles">
+          <h3>{title}</h3>
+          {subtitle ? <p>{subtitle}</p> : null}
         </div>
-      </summary>
-      <div className={`panel-body ${grid}`}>{children}</div>
-    </details>
+      </header>
+      <div className="panel-body contract-admin-body">{children}</div>
+    </section>
   )
 }
 
@@ -191,7 +201,7 @@ function emptyForm(): FormState {
   }
 }
 
-function contractToForm(contract: Contract): FormState {
+function contractToForm(contract: Contract, t: Dict): FormState {
   return {
     reservation_id: contract.reservation_id ?? '',
     client_id: contract.client_id,
@@ -233,11 +243,11 @@ function contractToForm(contract: Contract): FormState {
     vehicle_model: contract.vehicle_model || contract.model || '',
     vehicle_plate: contract.vehicle_plate || contract.plate_number || '',
     departure_at: toLocalDatetimeValue(contract.departure_at || contract.start_date),
-    departure_place: contract.departure_place || '',
+    departure_place: deliveryPlaceForDisplay(contract.departure_place, t),
     departure_mileage: contract.departure_mileage ?? 0,
     departure_fuel_level: contract.departure_fuel_level || 'plein',
     return_at: toLocalDatetimeValue(contract.return_at || contract.end_date),
-    return_place: contract.return_place || '',
+    return_place: deliveryPlaceForDisplay(contract.return_place, t),
     return_mileage: contract.return_mileage ?? 0,
     return_fuel_level: contract.return_fuel_level || '',
     billed_days: contract.billed_days ?? contract.total_days ?? 1,
@@ -260,7 +270,12 @@ function contractToForm(contract: Contract): FormState {
     vat_applies: contract.vat_applies !== 0,
     vat_rate: contract.vat_rate ?? 20,
     total_amount: contract.total_amount ?? 0,
-    notes: contract.notes || '',
+    notes: (contract.notes || '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !/^Prolongation\b/i.test(line))
+      .join('\n')
+      .trim(),
     customer_signed_at: contract.customer_signed_at || '',
     agency_signed_at: contract.agency_signed_at || '',
   }
@@ -279,6 +294,7 @@ export default function ContractFormPage() {
   const [chauffeurs, setChauffeurs] = useState<Chauffeur[]>([])
   const [driver2ChauffeurId, setDriver2ChauffeurId] = useState<number | ''>('')
   const [driver2CustomerId, setDriver2CustomerId] = useState<number | ''>('')
+  const [driver2Open, setDriver2Open] = useState(false)
   const [cars, setCars] = useState<Car[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
   const [pinnedReservation, setPinnedReservation] = useState<Reservation | null>(null)
@@ -304,7 +320,12 @@ export default function ContractFormPage() {
       const editingReservationId = editingContract?.reservation_id ?? null
       const usedReservationIds = new Set(
         contractRows
-          .filter((contract) => contract.reservation_id && contract.reservation_id !== editingReservationId)
+          .filter(
+            (contract) =>
+              isLiveContract(contract) &&
+              contract.reservation_id &&
+              contract.reservation_id !== editingReservationId,
+          )
           .map((contract) => contract.reservation_id) as number[],
       )
 
@@ -332,6 +353,7 @@ export default function ContractFormPage() {
     if (!reservation) return
 
     setPinnedReservation(reservation)
+    if (!isEdit) setPaidAmount(Number(reservation.paid_amount ?? 0))
 
     const car = cars.find((row) => row.id === reservation.car_id)
     const customer = customers.find((row) => row.id === reservation.customer_id)
@@ -353,9 +375,7 @@ export default function ContractFormPage() {
       departure_fuel_level: car?.fuel_level || 'plein',
       departure_notes: car?.condition_notes || '',
       // Lieu de départ = reservation delivery / pickup location
-      departure_place: reservation.delivery_location?.trim()
-        ? deliveryLocationLabel(reservation.delivery_location, t)
-        : '',
+      departure_place: deliveryPlaceForStorage(reservation.delivery_location),
     }
 
     if (reservation.chauffeur_id) {
@@ -420,7 +440,8 @@ export default function ContractFormPage() {
         return
       }
       setContractNumber(data.contract_number)
-      setForm(contractToForm(data))
+      setForm(contractToForm(data, t))
+      setDriver2Open(Boolean(String(data.driver2_name ?? '').trim()))
       setPaidAmount(Number(data.paid_amount ?? 0))
       if (data.reservation_id) {
         const linked = await window.api.getReservation(data.reservation_id)
@@ -447,7 +468,17 @@ export default function ContractFormPage() {
     () => calcContractTotal(form.billed_days, form.daily_rate, form.discount, form.extra_charges),
     [form.billed_days, form.daily_rate, form.discount, form.extra_charges],
   )
-  const remainingUnpaid = Math.max(0, previewTotal - paidAmount)
+
+  const linkedReservation = useMemo(() => {
+    const reservationId = Number(form.reservation_id)
+    if (!reservationId) return null
+    if (pinnedReservation?.id === reservationId) return pinnedReservation
+    return reservationOptions.find((row) => row.id === reservationId) ?? null
+  }, [form.reservation_id, pinnedReservation, reservationOptions])
+
+  // On create, cash already collected on the reservation must show here (shared ledger).
+  const displayPaid = isEdit ? paidAmount : Number(linkedReservation?.paid_amount ?? 0)
+  const remainingUnpaid = Math.max(0, previewTotal - displayPaid)
 
   const copyFromCustomer = () => {
     const customer = customers.find((row) => row.id === form.client_id)
@@ -472,6 +503,7 @@ export default function ContractFormPage() {
     if (!customer) return
     setDriver2CustomerId(customerId)
     setDriver2ChauffeurId('')
+    setDriver2Open(true)
     setForm((current) => ({
       ...current,
       ...customerToDriver2Fields(customer),
@@ -483,6 +515,7 @@ export default function ContractFormPage() {
     if (!chauffeur) return
     setDriver2ChauffeurId(chauffeurId)
     setDriver2CustomerId('')
+    setDriver2Open(true)
     setForm((current) => ({
       ...current,
       ...chauffeurToDriver2Fields(chauffeur),
@@ -492,6 +525,7 @@ export default function ContractFormPage() {
   const clearDriver2 = () => {
     setDriver2ChauffeurId('')
     setDriver2CustomerId('')
+    setDriver2Open(false)
     setForm((current) => ({
       ...current,
       ...emptyDriver2Fields(),
@@ -501,6 +535,7 @@ export default function ContractFormPage() {
   const onReservationChange = (value: string) => {
     if (!value) {
       setForm((current) => ({ ...current, reservation_id: '' }))
+      if (!isEdit) setPaidAmount(0)
       return
     }
     applyReservation(Number(value))
@@ -538,6 +573,8 @@ export default function ContractFormPage() {
     car_id: Number(form.car_id),
     departure_at: toIsoDatetime(form.departure_at),
     return_at: toIsoDatetime(form.return_at),
+    departure_place: deliveryPlaceForStorage(form.departure_place),
+    return_place: deliveryPlaceForStorage(form.return_place),
     equipment: JSON.stringify(form.equipment),
     departure_damages: JSON.stringify(form.departure_damages),
     return_damages: JSON.stringify(form.return_damages),
@@ -566,19 +603,7 @@ export default function ContractFormPage() {
         navigate(`/contracts/${created.id}/edit`)
       }
     } catch (err) {
-      const msg = String(err)
-      setError(
-        msg.includes('DRIVER1_REQUIRED')
-          ? t.driverRequired
-          : msg.includes('CAR_NOT_AVAILABLE')
-            ? t.carNotAvailable
-            : msg.includes('CONTRACT_ALREADY_EXISTS')
-              ? t.contractAlreadyExists
-              : msg.includes('CONTRACT_RESERVATION_CLIENT_MISMATCH') ||
-                  msg.includes('CONTRACT_RESERVATION_CAR_MISMATCH')
-                ? t.contractReservationMismatch
-                : msg,
-      )
+      setError(mapAppError(err, t))
     } finally {
       setSaving(false)
     }
@@ -593,7 +618,7 @@ export default function ContractFormPage() {
       await window.api.updateContract(Number(id), buildPayload())
       await window.api.generateContractPdf(Number(id))
     } catch (err) {
-      setError(String(err))
+      setError(mapAppError(err, t))
     } finally {
       setPdfLoading(false)
     }
@@ -604,10 +629,13 @@ export default function ContractFormPage() {
       await action()
       if (id) {
         const refreshed = await window.api.getContract(Number(id))
-        if (refreshed) setForm(contractToForm(refreshed))
+        if (refreshed) {
+          setForm(contractToForm(refreshed, t))
+          setDriver2Open(Boolean(String(refreshed.driver2_name ?? '').trim()))
+        }
       }
     } catch (err) {
-      setError(String(err))
+      setError(mapAppError(err, t))
     }
   }
 
@@ -635,33 +663,18 @@ export default function ContractFormPage() {
                 await window.api.updateContract(Number(id), buildPayload())
                 await window.api.markContractDelivered(Number(id))
                 const refreshed = await window.api.getContract(Number(id))
-                if (refreshed) setForm(contractToForm(refreshed))
+                if (refreshed) {
+                  setForm(contractToForm(refreshed, t))
+                  setDriver2Open(Boolean(refreshed.driver2_name?.trim()))
+                }
               } catch (err) {
-                setError(String(err))
+                setError(mapAppError(err, t))
               } finally {
                 setSaving(false)
               }
             }}
           >
             {t.markDelivered}
-          </button>
-        )}
-        {isEdit && form.status === 'active' && (
-          <button
-            type="button"
-            className="btn"
-            onClick={() =>
-              runAction(() =>
-                window.api.closeContract(Number(id), {
-                  return_at: form.return_at,
-                  return_mileage: form.return_mileage,
-                  return_fuel_level: form.return_fuel_level,
-                  return_notes: form.return_notes,
-                }),
-              )
-            }
-          >
-            {t.closeContract}
           </button>
         )}
         {isEdit && form.status !== 'closed' && form.status !== 'cancelled' && (
@@ -671,114 +684,113 @@ export default function ContractFormPage() {
         )}
       </PageHeader>
 
-      <form className="contract-form" onSubmit={onSubmit}>
-        {!isEdit && (
-          <section className="panel contract-reservation-link">
-            <div className="panel-body form-grid">
-              <div className="field full">
-                <label>{t.reservationRef}</label>
-                <p className="field-hint">{t.linkReservationHint}</p>
-                <select
-                  className="select"
-                  value={form.reservation_id}
-                  onChange={(e) => onReservationChange(e.target.value)}
-                >
-                  <option value="">{t.selectReservation}</option>
-                  {reservationOptions.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.reference} — {row.customer_name} — {row.car_name}
-                    </option>
-                  ))}
-                </select>
-                {reservations.length === 0 && !pinnedReservation && (
-                  <span className="field-hint">{t.noReservationForContract}</span>
-                )}
-              </div>
-            </div>
-          </section>
-        )}
-
-        <ContractSection title="Identité">
-          {isEdit && (
-            <div className="field">
-              <label>{t.contractNumber}</label>
-              <input className="input" value={contractNumber} readOnly />
-            </div>
-          )}
-          <div className="field">
-            <label>{t.contractDate}</label>
-            <input className="input" type="date" value={form.contract_date} onChange={(e) => setForm({ ...form, contract_date: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>{t.contractCity}</label>
-            <input className="input" value={form.contract_city} onChange={(e) => setForm({ ...form, contract_city: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>{t.status}</label>
-            <select className="select" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-              {CONTRACT_STATUSES.map((item) => (
-                <option key={item} value={item}>
-                  {t[item as keyof typeof t] || item}
-                </option>
-              ))}
-            </select>
-          </div>
-          {isEdit && (
+      <form className="contract-form contract-form--admin" onSubmit={onSubmit}>
+        <ContractSection step={1} title={t.contractIdentity} subtitle={t.contractIdentityHint}>
+          {!isEdit ? (
             <div className="field">
               <label>{t.reservationRef}</label>
-              <select
-                className="select"
-                value={form.reservation_id}
-                onChange={(e) => onReservationChange(e.target.value)}
-              >
+              <p className="field-hint">{t.linkReservationHint}</p>
+              <select className="select" value={form.reservation_id} onChange={(e) => onReservationChange(e.target.value)}>
                 <option value="">{t.selectReservation}</option>
                 {reservationOptions.map((row) => (
                   <option key={row.id} value={row.id}>
-                    {row.reference} — {row.customer_name}
+                    {row.reference} — {row.customer_name} — {row.car_name}
+                  </option>
+                ))}
+              </select>
+              {reservations.length === 0 && !pinnedReservation ? (
+                <span className="field-hint">{t.noReservationForContract}</span>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="form-grid">
+            <div className="field">
+              <label>{t.customer} *</label>
+              {reservationLinked ? <p className="field-hint">{t.reservationLinkedFieldsLocked}</p> : null}
+              <select
+                className="select"
+                required
+                disabled={reservationLinked}
+                value={form.client_id}
+                onChange={(e) => setForm({ ...form, client_id: Number(e.target.value) })}
+              >
+                <option value="">{t.selectClient}</option>
+                {customers.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name}
                   </option>
                 ))}
               </select>
             </div>
-          )}
-          <div className="field">
-            <label>{t.customer}</label>
-            {reservationLinked && <p className="field-hint">{t.reservationLinkedFieldsLocked}</p>}
-            <select
-              className="select"
-              required
-              disabled={reservationLinked}
-              value={form.client_id}
-              onChange={(e) => setForm({ ...form, client_id: Number(e.target.value) })}
-            >
-              <option value="">{t.selectClient}</option>
-              {customers.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>{t.car}</label>
-            <select
-              className="select"
-              required
-              disabled={reservationLinked}
-              value={form.car_id}
-              onChange={(e) => onCarChange(Number(e.target.value))}
-            >
-              <option value="">{t.selectCar}</option>
-              {cars.map((row) => (
-                <option key={row.id} value={row.id}>
-                  {row.name} — {row.plate_number}
-                </option>
-              ))}
-            </select>
+            <div className="field">
+              <label>{t.car} *</label>
+              <select
+                className="select"
+                required
+                disabled={reservationLinked}
+                value={form.car_id}
+                onChange={(e) => onCarChange(Number(e.target.value))}
+              >
+                <option value="">{t.selectCar}</option>
+                {cars.map((row) => (
+                  <option key={row.id} value={row.id}>
+                    {row.name} — {row.plate_number}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {isEdit ? (
+              <div className="field">
+                <label>{t.contractNumber}</label>
+                <input className="input" value={contractNumber} readOnly />
+              </div>
+            ) : null}
+            <div className="field">
+              <label>{t.contractDate}</label>
+              <input className="input" type="date" value={form.contract_date} onChange={(e) => setForm({ ...form, contract_date: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>{t.contractCity}</label>
+              <input className="input" value={form.contract_city} onChange={(e) => setForm({ ...form, contract_city: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>{t.status}</label>
+              <select className="select" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                {CONTRACT_STATUSES.map((item) => (
+                  <option key={item} value={item}>
+                    {t[item as keyof typeof t] || item}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {isEdit ? (
+              <div className="field">
+                <label>{t.reservationRef}</label>
+                <select className="select" value={form.reservation_id} onChange={(e) => onReservationChange(e.target.value)}>
+                  <option value="">{t.selectReservation}</option>
+                  {reservationOptions.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.reference} — {row.customer_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
           </div>
         </ContractSection>
 
-        <ContractSection title={t.driver1}>
-          <div className="field full">
+        <ContractSection step={2} title={t.driver1}>
+          <div className="driver-copy-banner">
+            <div>
+              <strong>{t.copyFromCustomer}</strong>
+              <p>{form.client_id ? t.copyFromCustomerHint : t.copyFromCustomerNeedClient}</p>
+            </div>
+            <button type="button" className="btn" disabled={!form.client_id} onClick={copyFromCustomer}>
+              {t.copyFromCustomer}
+            </button>
+          </div>
+          <div className="field">
             <label>{t.chauffeur}</label>
             <select
               className="select"
@@ -801,156 +813,172 @@ export default function ContractFormPage() {
             setForm={setForm as Dispatch<SetStateAction<Record<string, unknown>>>}
             t={t}
             required
-            onCopyFromCustomer={copyFromCustomer}
           />
         </ContractSection>
 
-        <ContractSection title={t.driver2}>
-          <div className="driver2-toolbar">
-            <div className="field">
-              <label>{t.chauffeur}</label>
-              <select
-                className="select"
-                value={driver2ChauffeurId}
-                onChange={(e) => {
-                  const value = e.target.value
-                  if (!value) {
-                    clearDriver2()
-                    return
-                  }
-                  copyDriver2FromChauffeur(Number(value))
-                }}
-              >
-                <option value="">{t.noDriver2}</option>
-                {chauffeurs.map((chauffeur) => (
-                  <option key={chauffeur.id} value={chauffeur.id}>
-                    {chauffeur.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label>{t.customer}</label>
-              <select
-                className="select"
-                value={driver2CustomerId}
-                onChange={(e) => {
-                  const value = e.target.value
-                  if (!value) {
-                    clearDriver2()
-                    return
-                  }
-                  copyDriver2FromCustomer(Number(value))
-                }}
-              >
-                <option value="">{t.noDriver2}</option>
-                {customers.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field driver2-clear-field">
-              <label>&nbsp;</label>
-              <button type="button" className="btn secondary" onClick={clearDriver2}>
-                {t.noDriver2}
+        <ContractSection step={3} title={t.driver2} subtitle={driver2Open ? undefined : t.noDriver2Hint}>
+          {!driver2Open ? (
+            <div className="driver2-empty-card">
+              <p className="muted-text">{t.noDriver2}</p>
+              <button type="button" className="btn secondary sm" onClick={() => setDriver2Open(true)}>
+                {t.addDriver2}
               </button>
             </div>
-          </div>
-          <DriverFields
-            prefix="driver2"
-            form={form}
-            setForm={setForm as Dispatch<SetStateAction<Record<string, unknown>>>}
-            t={t}
-          />
-          {!form.driver2_name.trim() ? (
-            <p className="muted-text driver2-empty-hint">{t.noDriver2Hint}</p>
-          ) : null}
+          ) : (
+            <>
+              <div className="driver2-toolbar">
+                <div className="field">
+                  <label>{t.chauffeur}</label>
+                  <select
+                    className="select"
+                    value={driver2ChauffeurId}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      if (!value) {
+                        clearDriver2()
+                        return
+                      }
+                      copyDriver2FromChauffeur(Number(value))
+                    }}
+                  >
+                    <option value="">{t.noDriver2}</option>
+                    {chauffeurs.map((chauffeur) => (
+                      <option key={chauffeur.id} value={chauffeur.id}>
+                        {chauffeur.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>{t.customer}</label>
+                  <select
+                    className="select"
+                    value={driver2CustomerId}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      if (!value) {
+                        clearDriver2()
+                        return
+                      }
+                      copyDriver2FromCustomer(Number(value))
+                    }}
+                  >
+                    <option value="">{t.noDriver2}</option>
+                    {customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field driver2-clear-field">
+                  <label>&nbsp;</label>
+                  <button type="button" className="btn secondary" onClick={clearDriver2}>
+                    {t.noDriver2}
+                  </button>
+                </div>
+              </div>
+              <DriverFields
+                prefix="driver2"
+                form={form}
+                setForm={setForm as Dispatch<SetStateAction<Record<string, unknown>>>}
+                t={t}
+              />
+            </>
+          )}
         </ContractSection>
 
-        <ContractSection title={t.vehicleDescription} grid="form-grid-3">
-          <div className="field">
-            <label>{t.brand}</label>
-            <input className="input" value={form.vehicle_brand} onChange={(e) => setForm({ ...form, vehicle_brand: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>{t.model}</label>
-            <input className="input" value={form.vehicle_model} onChange={(e) => setForm({ ...form, vehicle_model: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>{t.plateNumber}</label>
-            <input className="input" value={form.vehicle_plate} onChange={(e) => setForm({ ...form, vehicle_plate: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>{t.departureAt}</label>
-            <input
-              className="input"
-              type="datetime-local"
-              value={form.departure_at}
-              onChange={(e) => {
-                setForm({ ...form, departure_at: e.target.value })
-                recalcDays(e.target.value, form.return_at)
-              }}
-            />
-          </div>
-          <div className="field">
-            <label>{t.departurePlace}</label>
-            <input className="input" value={form.departure_place} onChange={(e) => setForm({ ...form, departure_place: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>{t.returnAt}</label>
-            <input
-              className="input"
-              type="datetime-local"
-              value={form.return_at}
-              disabled={form.extension_days > 0}
-              title={form.extension_days > 0 ? t.extendRentalHint : undefined}
-              onChange={(e) => {
-                setForm({ ...form, return_at: e.target.value })
-                recalcDays(form.departure_at, e.target.value)
-              }}
-            />
-          </div>
-          <div className="field">
-            <label>{t.returnPlace}</label>
-            <input className="input" value={form.return_place} onChange={(e) => setForm({ ...form, return_place: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>{t.billedDaysLabel}</label>
-            <input className="input" type="number" min={1} value={form.billed_days} onChange={(e) => setForm({ ...form, billed_days: Number(e.target.value) })} />
+        <ContractSection step={4} title={t.rentalPeriod} subtitle={t.rentalPeriodHint}>
+          <div className="form-grid">
+            <div className="field">
+              <label>{t.departureAt}</label>
+              <input
+                className="input"
+                type="datetime-local"
+                value={form.departure_at}
+                onChange={(e) => {
+                  setForm({ ...form, departure_at: e.target.value })
+                  recalcDays(e.target.value, form.return_at)
+                }}
+              />
+            </div>
+            <div className="field">
+              <label>{t.departurePlace}</label>
+              <input className="input" value={form.departure_place} onChange={(e) => setForm({ ...form, departure_place: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>{t.returnAt}</label>
+              <input
+                className="input"
+                type="datetime-local"
+                value={form.return_at}
+                disabled={form.extension_days > 0}
+                title={form.extension_days > 0 ? t.extendRentalHint : undefined}
+                onChange={(e) => {
+                  setForm({ ...form, return_at: e.target.value })
+                  recalcDays(form.departure_at, e.target.value)
+                }}
+              />
+            </div>
+            <div className="field">
+              <label>{t.returnPlace}</label>
+              <input className="input" value={form.return_place} onChange={(e) => setForm({ ...form, return_place: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>{t.billedDaysLabel}</label>
+              <input className="input" type="number" min={1} value={form.billed_days} onChange={(e) => setForm({ ...form, billed_days: Number(e.target.value) })} />
+            </div>
           </div>
         </ContractSection>
 
-        <ContractSection title={t.equipmentSection}>
-          <div className="field full equipment-grid">
-            {EQUIPMENT_KEYS.map((key) => (
-              <label key={key} className="checkbox-row">
-                <input
-                  type="checkbox"
-                  checked={form.equipment.includes(key)}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      equipment: e.target.checked
-                        ? [...form.equipment, key]
-                        : form.equipment.filter((item) => item !== key),
-                    })
-                  }
-                />
-                {t[`equip_${key}` as keyof typeof t] || key}
-              </label>
-            ))}
+        <ContractSection step={5} title={t.vehicleAndGear} subtitle={t.vehicleStateSubtitle}>
+          <div className="form-grid-3">
+            <div className="field">
+              <label>{t.brand}</label>
+              <input className="input" value={form.vehicle_brand} onChange={(e) => setForm({ ...form, vehicle_brand: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>{t.model}</label>
+              <input className="input" value={form.vehicle_model} onChange={(e) => setForm({ ...form, vehicle_model: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>{t.plateNumber}</label>
+              <input className="input" value={form.vehicle_plate} onChange={(e) => setForm({ ...form, vehicle_plate: e.target.value })} />
+            </div>
           </div>
-          <div className="field full">
+
+          <div className="field">
+            <label>{t.equipmentSection}</label>
+            <div className="equipment-chips">
+              {EQUIPMENT_KEYS.map((key) => {
+                const on = form.equipment.includes(key)
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    className={`equipment-chip${on ? ' is-on' : ''}`}
+                    aria-pressed={on}
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        equipment: on ? form.equipment.filter((item) => item !== key) : [...form.equipment, key],
+                      })
+                    }
+                  >
+                    {t[`equip_${key}` as keyof typeof t] || key}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <div className="field">
             <label>{t.equipmentOther}</label>
             <input className="input" value={form.equipment_other} onChange={(e) => setForm({ ...form, equipment_other: e.target.value })} />
           </div>
-        </ContractSection>
 
-        <ContractSection title={t.deliveryStateTitle} subtitle={t.vehicleStateSubtitle} grid="vehicle-state-section">
           <ContractVehicleStateSection
             kind="departure"
+            compact
             mileage={form.departure_mileage}
             fuelLevel={form.departure_fuel_level}
             notes={form.departure_notes}
@@ -963,104 +991,102 @@ export default function ContractFormPage() {
           />
         </ContractSection>
 
-        <ContractSection title={t.billingSection}>
-          <div className="field">
-            <label>{t.dailyRate}</label>
-            <input
-              className="input"
-              type="number"
-              value={form.daily_rate}
-              onChange={(e) => setForm({ ...form, daily_rate: Number(e.target.value) })}
-            />
-          </div>
-          <div className="field">
-            <label>{t.discount}</label>
-            <input className="input" type="number" value={form.discount} onChange={(e) => setForm({ ...form, discount: Number(e.target.value) })} />
-          </div>
-          <div className="field">
-            <label>{t.deposit}</label>
-            <input className="input" type="number" value={form.deposit_amount} onChange={(e) => setForm({ ...form, deposit_amount: Number(e.target.value) })} />
-          </div>
-          <div className="field">
-            <label>{t.extraCharges}</label>
-            <input className="input" type="number" value={form.extra_charges} onChange={(e) => setForm({ ...form, extra_charges: Number(e.target.value) })} />
-          </div>
-          <div className="field full">
-            <label>{t.extraChargesNote}</label>
-            <input
-              className="input"
-              value={form.extra_charges_note}
-              onChange={(e) => setForm({ ...form, extra_charges_note: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label className="checkbox-row">
-              <input type="checkbox" checked={form.vat_applies} onChange={(e) => setForm({ ...form, vat_applies: e.target.checked })} />
-              {t.vatApplies}
-            </label>
-          </div>
-          <div className="field">
-            <label>{t.vatRate}</label>
-            <input className="input" type="number" value={form.vat_rate} onChange={(e) => setForm({ ...form, vat_rate: Number(e.target.value) })} />
-          </div>
-          <div className="field">
-            <label className="checkbox-row">
+        <ContractSection step={6} title={t.billingSection}>
+          <div className="form-grid">
+            <div className="field">
+              <label>{t.dailyRate}</label>
               <input
-                type="checkbox"
-                checked={form.franchise_applies}
-                onChange={(e) =>
+                className="input"
+                type="number"
+                value={form.daily_rate}
+                onChange={(e) => setForm({ ...form, daily_rate: Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>{t.discount}</label>
+              <input className="input" type="number" value={form.discount} onChange={(e) => setForm({ ...form, discount: Number(e.target.value) })} />
+            </div>
+            <div className="field">
+              <label>{t.deposit}</label>
+              <input className="input" type="number" value={form.deposit_amount} onChange={(e) => setForm({ ...form, deposit_amount: Number(e.target.value) })} />
+            </div>
+            <div className="field">
+              <label>{t.extraCharges}</label>
+              <input className="input" type="number" value={form.extra_charges} onChange={(e) => setForm({ ...form, extra_charges: Number(e.target.value) })} />
+            </div>
+            <div className="field full">
+              <label>{t.extraChargesNote}</label>
+              <input
+                className="input"
+                value={form.extra_charges_note}
+                onChange={(e) => setForm({ ...form, extra_charges_note: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label className="checkbox-row">
+                <input type="checkbox" checked={form.vat_applies} onChange={(e) => setForm({ ...form, vat_applies: e.target.checked })} />
+                {t.vatApplies}
+              </label>
+            </div>
+            <div className="field">
+              <label>{t.vatRate}</label>
+              <input className="input" type="number" value={form.vat_rate} disabled={!form.vat_applies} onChange={(e) => setForm({ ...form, vat_rate: Number(e.target.value) })} />
+            </div>
+            <div className="field">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={form.franchise_applies}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      franchise_applies: e.target.checked,
+                      franchise_amount: e.target.checked ? form.franchise_amount : 0,
+                    })
+                  }
+                />
+                {t.franchiseApplies}
+              </label>
+            </div>
+            <div className="field">
+              <label>{t.franchiseAmount}</label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                value={form.franchise_amount}
+                disabled={!form.franchise_applies}
+                onChange={(e) => {
+                  const franchise_amount = Number(e.target.value)
                   setForm({
                     ...form,
-                    franchise_applies: e.target.checked,
-                    franchise_amount: e.target.checked ? form.franchise_amount : 0,
+                    franchise_amount,
+                    franchise_applies: franchise_amount > 0 ? true : form.franchise_applies,
                   })
-                }
+                }}
               />
-              {t.franchiseApplies}
-            </label>
+            </div>
           </div>
-          <div className="field">
-            <label>{t.franchiseAmount}</label>
-            <input
-              className="input"
-              type="number"
-              min={0}
-              value={form.franchise_amount}
-              disabled={!form.franchise_applies}
-              onChange={(e) => {
-                const franchise_amount = Number(e.target.value)
-                setForm({
-                  ...form,
-                  franchise_amount,
-                  franchise_applies: franchise_amount > 0 ? true : form.franchise_applies,
-                })
-              }}
-            />
+
+          <div className="contract-billing-summary">
+            <div>
+              <span>{t.total}</span>
+              <strong>{money(previewTotal)}</strong>
+            </div>
+            <div className="contract-billing-paid">
+              <span>
+                {t.amountPaid}: <b>{money(displayPaid)}</b>
+              </span>
+              <span className={remainingUnpaid > 0 ? 'text-danger' : ''}>
+                {t.remainingUnpaid}: <b>{remainingUnpaid > 0 ? money(remainingUnpaid) : t.fullyPaid}</b>
+              </span>
+            </div>
           </div>
-          <div className="field">
-            <label>{t.total}</label>
-            <strong>{money(previewTotal)}</strong>
-          </div>
-          {isEdit ? (
-            <>
-              <div className="field">
-                <label>{t.amountPaid}</label>
-                <strong>{money(paidAmount)}</strong>
-                <p className="field-hint">{t.amountPaidHint}</p>
-              </div>
-              <div className="field">
-                <label>{t.remainingUnpaid}</label>
-                <strong className={remainingUnpaid > 0 ? 'text-danger' : ''}>
-                  {remainingUnpaid > 0 ? money(remainingUnpaid) : t.fullyPaid}
-                </strong>
-              </div>
-            </>
-          ) : null}
         </ContractSection>
 
-        <ContractSection title={t.notes}>
-          <div className="field full">
-            <textarea className="textarea" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+        <ContractSection step={7} title={t.notes}>
+          <div className="field">
+            <textarea className="textarea" rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </div>
         </ContractSection>
 

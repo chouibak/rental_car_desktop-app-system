@@ -1,5 +1,9 @@
 export const CONTRACT_STATUSES = ['active', 'draft', 'closed', 'cancelled'] as const
 
+export function isLiveContract(contract: { status?: string | null; deleted_at?: string | null }) {
+  return !contract.deleted_at && contract.status !== 'cancelled'
+}
+
 export const FUEL_LEVELS = ['vide', 'quart', 'moitie', 'trois_quarts', 'plein'] as const
 
 export const FUEL_FRACTION: Record<(typeof FUEL_LEVELS)[number], string> = {
@@ -34,13 +38,9 @@ export const DAMAGE_PARTS = [
   'interior',
 ] as const
 
-export type ContractDamage = {
-  part: string
-  type: string
-  note: string
-  photo?: string
-  video?: string
-}
+import type { ContractDamage } from '../types'
+
+export type { ContractDamage }
 
 export function parseEquipment(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String)
@@ -121,10 +121,9 @@ export function getOriginalRentalTotal(
   dailyRate: number,
   storedOriginalTotal?: number | null,
 ) {
-  const stored = Number(storedOriginalTotal ?? 0)
-  if (stored > 0) return stored
   const ext = Math.max(0, Math.floor(Number(extensionDays) || 0))
   if (ext <= 0) return totalAmount
+  if (dailyRate <= 0) return Number(storedOriginalTotal ?? 0) || totalAmount
   return Math.max(0, totalAmount - ext * dailyRate)
 }
 
@@ -155,7 +154,22 @@ export function calcExtensionPreview(input: {
   }
 }
 
-export function formatContractDatetime(value: string) {
+export function formatContractDate(value: string | null | undefined) {
+  if (!value) return '—'
+  const raw = String(value).trim()
+  const ymd = raw.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (ymd) {
+    const d = new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]))
+    if (Number.isNaN(d.getTime())) return raw
+    return d.toLocaleDateString('fr-FR')
+  }
+  const d = new Date(raw)
+  if (Number.isNaN(d.getTime())) return raw
+  return d.toLocaleDateString('fr-FR')
+}
+
+export function formatContractDatetime(value: string | null | undefined) {
+  if (!value) return '—'
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' })
