@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState, type ReactNode } from 'react'
+import { IconCar } from './icons'
 import { useLang } from '../context/LangContext'
 import { AuthProvider } from '../context/AuthContext'
 import { PasswordInput } from './PasswordInput'
@@ -82,7 +83,9 @@ export function AuthGate({ children }: Props) {
     <div className="license-screen">
       <div className="license-card">
         <div className="license-brand">
-          <div className="license-brand-mark">RC</div>
+          <div className="license-brand-mark">
+            <IconCar size={28} />
+          </div>
           <div>
             <h1>{t.appName}</h1>
             <p className="muted-text">{t.authSubtitle}</p>

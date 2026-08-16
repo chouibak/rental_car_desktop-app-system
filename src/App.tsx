@@ -57,13 +57,6 @@ const navIcons = {
   '/settings': IconSettings,
 } as const
 
-function agencyInitials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  if (parts.length === 0) return 'RC'
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return `${parts[0][0] ?? ''}${parts[1][0] ?? ''}`.toUpperCase()
-}
-
 export default function App() {
   const { t, lang, setLang, dir } = useLang()
   const { username, logout } = useAuth()
@@ -121,7 +114,7 @@ export default function App() {
         <div className="sidebar-brand">
           <div className="sidebar-brand-mark">
             <div className={`brand-badge${agencyLogoUrl ? ' brand-badge--logo' : ''}`}>
-              {agencyLogoUrl ? <img src={agencyLogoUrl} alt={agencyName} /> : agencyInitials(agencyName)}
+              {agencyLogoUrl ? <img src={agencyLogoUrl} alt={agencyName} /> : <IconCar size={16} />}
             </div>
             <span className="sidebar-brand-name" title={agencyName}>
               {agencyName}

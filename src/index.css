@@ -202,6 +202,10 @@ a {
   display: block;
 }
 
+.brand-badge svg {
+  display: block;
+}
+
 .nav {
   display: flex;
   flex-direction: column;
@@ -4844,6 +4848,10 @@ th {
   place-items: center;
   font-weight: 800;
   font-size: 1.1rem;
+}
+
+.license-brand-mark svg {
+  display: block;
 }
 
 .license-brand h1 {
