@@ -1,7 +1,15 @@
 import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import type { Dict } from '../i18n'
 import type { ContractDamage } from '../utils/contracts'
-import { DAMAGE_PARTS, DAMAGE_TYPES, FUEL_FRACTION, FUEL_LEVELS } from '../utils/contracts'
+import {
+  DAMAGE_PARTS,
+  DAMAGE_TYPES,
+  FUEL_FRACTION,
+  FUEL_LEVELS,
+  createDamageAt,
+  getDefaultDamagePosition,
+} from '../utils/contracts'
+import { CarDamageDiagram } from './CarDamageDiagram'
 
 function DamagePhotoPreview({ path }: { path: string }) {
   const [url, setUrl] = useState('')
@@ -72,11 +80,21 @@ type ContractDamageRepeaterProps = {
 
 export function ContractDamageRepeater({ damages, kind, onChange, t }: ContractDamageRepeaterProps) {
   const update = (index: number, patch: Partial<ContractDamage>) => {
-    onChange(damages.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+    onChange(
+      damages.map((row, i) => {
+        if (i !== index) return row
+        if (patch.part) {
+          const pos = getDefaultDamagePosition(patch.part)
+          return { ...row, ...patch, x: pos.x, y: pos.y }
+        }
+        return { ...row, ...patch }
+      }),
+    )
   }
 
   const addRow = () => {
-    onChange([...damages, { part: 'front', type: 'R', note: '' }])
+    const pos = getDefaultDamagePosition('front_bumper')
+    onChange([...damages, createDamageAt(pos.x, pos.y)])
   }
 
   const removeRow = (index: number) => {
@@ -106,8 +124,15 @@ export function ContractDamageRepeater({ damages, kind, onChange, t }: ContractD
     <div className="damage-repeater">
       <span className="vehicle-state-damages-label">{t.observedDamages}</span>
 
-      {damages.map((damage, index) => (
-        <div className="damage-item" key={`${kind}-${index}`}>
+      <button type="button" className="btn secondary damage-add-btn" onClick={addRow}>
+        {t.addDamageBtn}
+      </button>
+
+      {[...damages].reverse().map((damage, reversedIndex) => {
+        const index = damages.length - 1 - reversedIndex
+        return (
+        <div className="damage-item" key={damage.id || `${kind}-${index}`}>
+          <div className="damage-item-index">{index + 1}</div>
           <div className="damage-item-top">
             <div className="field">
               <label>{t.damagePart}</label>
@@ -147,7 +172,14 @@ export function ContractDamageRepeater({ damages, kind, onChange, t }: ContractD
             <button type="button" className="btn secondary sm" onClick={() => pickPhoto(index)}>
               {t.addPhoto}
             </button>
-            {damage.photo ? <DamagePhotoPreview path={damage.photo} /> : null}
+            {damage.photo ? (
+              <>
+                <DamagePhotoPreview path={damage.photo} />
+                <button type="button" className="btn secondary sm" onClick={() => update(index, { photo: '' })}>
+                  {t.removePhoto}
+                </button>
+              </>
+            ) : null}
             <button type="button" className="btn secondary sm" onClick={() => pickVideo(index)}>
               {t.addVideo}
             </button>
@@ -161,11 +193,8 @@ export function ContractDamageRepeater({ damages, kind, onChange, t }: ContractD
             ) : null}
           </div>
         </div>
-      ))}
-
-      <button type="button" className="btn secondary damage-add-btn" onClick={addRow}>
-        {t.addDamageBtn}
-      </button>
+        )
+      })}
     </div>
   )
 }
@@ -175,11 +204,13 @@ type ContractVehicleStateSectionProps = {
   fuelLevel: string
   notes: string
   damages: ContractDamage[]
+  sketch?: string | null
   mileage?: number
   onMileageChange?: (value: number) => void
   onFuelChange: (value: string) => void
   onNotesChange: (value: string) => void
   onDamagesChange: (damages: ContractDamage[]) => void
+  onSketchChange?: (value: string) => void
   t: Dict
   compact?: boolean
 }
@@ -239,6 +270,12 @@ export function ContractVehicleStateSection({
       </div>
 
       <div className="vehicle-state-damages">
+        <CarDamageDiagram
+          damages={damages}
+          onChange={onDamagesChange}
+          t={t}
+          readOnly={!onDamagesChange}
+        />
         <ContractDamageRepeater
           kind={kind}
           damages={damages}

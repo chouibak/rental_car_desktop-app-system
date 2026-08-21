@@ -972,7 +972,7 @@ export default function SettingsPage() {
 
 
 
-        <div className="settings-form-footer panel">
+        <div className="settings-form-footer panel form-actions--sticky">
 
           <div className="panel-body" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
 

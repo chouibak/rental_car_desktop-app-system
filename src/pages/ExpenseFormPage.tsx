@@ -1,10 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { CarSearchSelect } from '../components/CarSearchSelect'
+import { useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import type { Dict } from '../i18n'
-import type { Car, Expense, ExpenseCategory, ExpensePaymentMethod } from '../types'
+import type { Expense, ExpenseCategory, ExpensePaymentMethod } from '../types'
 import { todayYmd } from '../utils/calendar'
 import { mapAppError } from '../utils/errors'
 
@@ -49,28 +48,14 @@ export default function ExpenseFormPage() {
   const { t } = useLang()
   const navigate = useNavigate()
   const { id } = useParams()
-  const [searchParams] = useSearchParams()
   const isEdit = Boolean(id)
   const expenseId = id ? Number(id) : undefined
-  const presetCarId = searchParams.get('car_id')
 
   const [form, setForm] = useState(emptyForm())
-  const [cars, setCars] = useState<Car[]>([])
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [receiptPreview, setReceiptPreview] = useState('')
-
-  useEffect(() => {
-    window.api.listCars().then(setCars)
-  }, [])
-
-  useEffect(() => {
-    if (isEdit && expenseId) return
-    if (presetCarId) {
-      setForm((current) => ({ ...current, car_id: Number(presetCarId) }))
-    }
-  }, [isEdit, expenseId, presetCarId])
 
   useEffect(() => {
     if (!isEdit || !expenseId) return
@@ -131,14 +116,13 @@ export default function ExpenseFormPage() {
       payment_method: form.payment_method,
       receipt_path: form.receipt_path,
       notes: form.notes?.trim() || '',
-      car_id: form.car_id ?? null,
+      car_id: null,
     }
 
     try {
       if (isEdit && expenseId) await window.api.updateExpense(expenseId, payload)
       else await window.api.createExpense(payload)
-      if (form.car_id) navigate(`/cars/${form.car_id}`)
-      else navigate('/expenses')
+      navigate('/expenses')
     } catch (err) {
       setError(mapAppError(err, t))
     } finally {
@@ -173,27 +157,6 @@ export default function ExpenseFormPage() {
                 autoFocus
                 required
               />
-            </div>
-
-            <div className="field full">
-              <label>{t.expenseVehicle}</label>
-              <CarSearchSelect
-                cars={cars}
-                value={form.car_id ?? ''}
-                selectedCarId={form.car_id ?? ''}
-                onChange={(carId) => setForm((current) => ({ ...current, car_id: carId }))}
-              />
-              {form.car_id ? (
-                <button
-                  type="button"
-                  className="link-btn expense-clear-car"
-                  onClick={() => setForm((current) => ({ ...current, car_id: null }))}
-                >
-                  {t.expenseAgency}
-                </button>
-              ) : (
-                <span className="muted-text text-sm">{t.expenseNoVehicle}</span>
-              )}
             </div>
 
             <div className="field">
@@ -295,7 +258,7 @@ export default function ExpenseFormPage() {
           </div>
         </section>
 
-        <div className="form-actions">
+        <div className="form-actions form-actions--sticky">
           <button type="button" className="btn secondary" onClick={() => navigate('/expenses')}>
             {t.cancel}
           </button>

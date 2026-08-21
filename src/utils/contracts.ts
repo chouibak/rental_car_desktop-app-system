@@ -28,12 +28,28 @@ export const EQUIPMENT_KEYS = [
 export const DAMAGE_TYPES = ['R', 'B', 'E', 'C'] as const
 
 export const DAMAGE_PARTS = [
+  'front_bumper',
+  'hood',
+  'front_left_fender',
+  'front_right_fender',
+  'front_left_door',
+  'rear_left_door',
+  'front_right_door',
+  'rear_right_door',
+  'roof',
+  'windshield',
+  'rear_window',
+  'rear_bumper',
+  'rear_left_fender',
+  'rear_right_fender',
+  'front_left_wheel',
+  'front_right_wheel',
+  'rear_left_wheel',
+  'rear_right_wheel',
   'front',
   'rear',
   'left_side',
   'right_side',
-  'roof',
-  'windshield',
   'wheels',
   'interior',
 ] as const
@@ -41,6 +57,109 @@ export const DAMAGE_PARTS = [
 import type { ContractDamage } from '../types'
 
 export type { ContractDamage }
+
+const DEFAULT_DAMAGE_POSITION_BY_PART: Record<string, { x: number; y: number }> = {
+  front_bumper: { x: 50, y: 12 },
+  hood: { x: 50, y: 22 },
+  windshield: { x: 50, y: 33 },
+  roof: { x: 50, y: 50 },
+  rear_window: { x: 50, y: 66 },
+  rear_bumper: { x: 50, y: 89 },
+  front_left_fender: { x: 12, y: 31 },
+  front_left_door: { x: 12, y: 43 },
+  rear_left_door: { x: 12, y: 57 },
+  rear_left_fender: { x: 12, y: 69 },
+  front_right_fender: { x: 88, y: 31 },
+  front_right_door: { x: 88, y: 43 },
+  rear_right_door: { x: 88, y: 57 },
+  rear_right_fender: { x: 88, y: 69 },
+  front_left_wheel: { x: 15, y: 25 },
+  rear_left_wheel: { x: 15, y: 75 },
+  front_right_wheel: { x: 85, y: 25 },
+  rear_right_wheel: { x: 85, y: 75 },
+  front: { x: 50, y: 12 },
+  rear: { x: 50, y: 89 },
+  left_side: { x: 12, y: 50 },
+  right_side: { x: 88, y: 50 },
+  wheels: { x: 15, y: 25 },
+  interior: { x: 50, y: 50 },
+}
+
+function clampPercent(value: unknown, fallback: number) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(0, Math.min(100, Math.round(n * 10) / 10))
+}
+
+export function createDamageId() {
+  return `damage_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+export function getDefaultDamagePosition(part?: string) {
+  return DEFAULT_DAMAGE_POSITION_BY_PART[part || ''] || DEFAULT_DAMAGE_POSITION_BY_PART.front_bumper
+}
+
+export function inferDamagePartFromPosition(x: number, y: number) {
+  const px = clampPercent(x, 50)
+  const py = clampPercent(y, 50)
+
+  if (py <= 19) return 'front_bumper'
+  if (py >= 82) return 'rear_bumper'
+
+  if (px <= 22) {
+    if (py <= 31) return 'front_left_wheel'
+    if (py >= 69) return 'rear_left_wheel'
+    if (py <= 37) return 'front_left_fender'
+    if (py <= 50) return 'front_left_door'
+    if (py <= 63) return 'rear_left_door'
+    return 'rear_left_fender'
+  }
+
+  if (px >= 78) {
+    if (py <= 31) return 'front_right_wheel'
+    if (py >= 69) return 'rear_right_wheel'
+    if (py <= 37) return 'front_right_fender'
+    if (py <= 50) return 'front_right_door'
+    if (py <= 63) return 'rear_right_door'
+    return 'rear_right_fender'
+  }
+
+  if (py <= 28) return 'hood'
+  if (py <= 39) return 'windshield'
+  if (py <= 61) return 'roof'
+  return 'rear_window'
+}
+
+export function normalizeDamage(input: ContractDamage) {
+  const basePart = typeof input.part === 'string' && input.part.trim() ? input.part : 'front_bumper'
+  const fallback = getDefaultDamagePosition(basePart)
+  const x = clampPercent(input.x, fallback.x)
+  const y = clampPercent(input.y, fallback.y)
+
+  return {
+    ...input,
+    id: typeof input.id === 'string' && input.id.trim() ? input.id : createDamageId(),
+    part: basePart,
+    type: typeof input.type === 'string' && input.type.trim() ? input.type : 'R',
+    note: input.note || '',
+    x,
+    y,
+  }
+}
+
+export function createDamageAt(x: number, y: number, patch: Partial<ContractDamage> = {}): ContractDamage {
+  const part = patch.part || inferDamagePartFromPosition(x, y)
+  return normalizeDamage({
+    id: patch.id,
+    part,
+    type: patch.type || 'R',
+    note: patch.note || '',
+    x,
+    y,
+    photo: patch.photo,
+    video: patch.video,
+  })
+}
 
 export function parseEquipment(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(String)
@@ -56,11 +175,11 @@ export function parseEquipment(value: unknown): string[] {
 }
 
 export function parseDamages(value: unknown): ContractDamage[] {
-  if (Array.isArray(value)) return value as ContractDamage[]
+  if (Array.isArray(value)) return value.map((row) => normalizeDamage(row as ContractDamage))
   if (typeof value === 'string' && value.trim()) {
     try {
       const parsed = JSON.parse(value)
-      return Array.isArray(parsed) ? (parsed as ContractDamage[]) : []
+      return Array.isArray(parsed) ? parsed.map((row) => normalizeDamage(row as ContractDamage)) : []
     } catch {
       return []
     }

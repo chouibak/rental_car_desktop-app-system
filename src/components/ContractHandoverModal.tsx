@@ -31,7 +31,13 @@ function toDatetimeLocal(value?: string) {
 }
 
 function isMeaningfulDamage(row: ContractDamage) {
-  return Boolean(row.note?.trim() || row.photo || row.video)
+  return Boolean(
+    row.note?.trim() ||
+      row.photo ||
+      row.video ||
+      (Number.isFinite(Number(row.x)) && Number.isFinite(Number(row.y))) ||
+      row.part?.trim(),
+  )
 }
 
 function buildInitialForm(mode: HandoverMode, contract: Contract, car: Car | null) {
@@ -50,6 +56,7 @@ function buildInitialForm(mode: HandoverMode, contract: Contract, car: Car | nul
       notes: contract.return_notes || '',
       damages: existingDamages,
       extra_fees: '' as number | '',
+      sketch: contract.return_sketch || '',
     }
   }
 
@@ -61,6 +68,7 @@ function buildInitialForm(mode: HandoverMode, contract: Contract, car: Car | nul
     notes: contract.departure_notes || '',
     damages: existingDamages,
     extra_fees: '' as number | '',
+    sketch: contract.departure_sketch || '',
   }
 }
 
@@ -142,6 +150,7 @@ export function ContractHandoverForm({
           departure_fuel_level: form.fuel_level,
           departure_notes: form.notes.trim(),
           departure_damages: damages,
+          departure_sketch: form.sketch || undefined,
         })
       } else if (mode === 'departure-edit') {
         await window.api.updateContract(contract.id, {
@@ -151,6 +160,7 @@ export function ContractHandoverForm({
           departure_fuel_level: form.fuel_level,
           departure_notes: form.notes.trim(),
           departure_damages: damages,
+          departure_sketch: form.sketch || undefined,
         })
       } else if (mode === 'return-edit') {
         await window.api.updateReturnHandover(contract.id, {
@@ -160,6 +170,7 @@ export function ContractHandoverForm({
           return_fuel_level: form.fuel_level,
           return_notes: form.notes.trim(),
           return_damages: damages,
+          return_sketch: form.sketch || undefined,
         })
       } else {
         await window.api.closeContract(contract.id, {
@@ -170,6 +181,7 @@ export function ContractHandoverForm({
           return_notes: form.notes.trim(),
           return_damages: damages,
           return_extra_fees: Number(form.extra_fees) || 0,
+          return_sketch: form.sketch || undefined,
         })
       }
       showSuccess(t.handoverSaveSuccess)
@@ -254,9 +266,11 @@ export function ContractHandoverForm({
             fuelLevel={form.fuel_level}
             notes={form.notes}
             damages={form.damages}
+            sketch={form.sketch}
             onFuelChange={(fuel_level) => setForm({ ...form, fuel_level })}
             onNotesChange={(notes) => setForm({ ...form, notes })}
             onDamagesChange={(damages: ContractDamage[]) => setForm({ ...form, damages })}
+            onSketchChange={(sketch) => setForm({ ...form, sketch })}
             t={t}
             compact={inline}
           />
@@ -265,7 +279,7 @@ export function ContractHandoverForm({
 
       {error ? <p className="form-error handover-form-error">{error}</p> : null}
 
-      <footer className={inline ? 'handover-inline-footer' : undefined}>
+      <footer className={`form-actions form-actions--sticky${inline ? ' handover-inline-footer' : ''}`}>
         {!inline ? (
           <button type="button" className="btn secondary" onClick={onClose} disabled={saving}>
             {t.cancel}

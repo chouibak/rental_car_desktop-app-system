@@ -7,9 +7,12 @@ import { roundMoney, SQL_NOW } from './local-date'
 export type ContractStatus = 'draft' | 'active' | 'closed' | 'cancelled'
 
 export type ContractDamage = {
+  id?: string
   part: string
   type: string
   note: string
+  x?: number
+  y?: number
   photo?: string
   video?: string
 }
@@ -78,6 +81,8 @@ export type ContractRecord = {
   equipment_other: string
   departure_damages: string
   return_damages: string
+  departure_sketch: string
+  return_sketch: string
   include_damage_photos_in_pdf: number
   daily_rate: number
   total_amount: number
@@ -135,6 +140,7 @@ export type CloseContractInput = {
   extra_charges?: number
   return_extra_fees?: number
   extra_charges_note?: string
+  return_sketch?: string
 }
 
 export type DeliveryHandoverInput = {
@@ -144,6 +150,7 @@ export type DeliveryHandoverInput = {
   departure_fuel_level?: string
   departure_notes?: string
   departure_damages?: ContractDamage[]
+  departure_sketch?: string
 }
 
 export type ExtendContractInput = {
@@ -253,6 +260,8 @@ const MIGRATION_COLUMNS: Array<[string, string]> = [
   ['equipment_other', 'TEXT'],
   ['departure_damages', 'TEXT'],
   ['return_damages', 'TEXT'],
+  ['departure_sketch', 'TEXT'],
+  ['return_sketch', 'TEXT'],
   ['include_damage_photos_in_pdf', 'INTEGER DEFAULT 0'],
   ['daily_rate', 'REAL DEFAULT 0'],
   ['deposit_amount', 'REAL DEFAULT 0'],
@@ -1566,6 +1575,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
             departure_fuel_level = COALESCE(NULLIF(?, ''), departure_fuel_level),
             departure_notes = COALESCE(?, departure_notes),
             departure_damages = ?,
+            departure_sketch = COALESCE(?, departure_sketch),
             updated_at = ?
            WHERE id = ?`,
           [
@@ -1576,6 +1586,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
             data.departure_fuel_level ?? '',
             data.departure_notes ?? null,
             departureDamagesJson,
+            data.departure_sketch ?? null,
             t,
             id,
           ],
@@ -1643,7 +1654,8 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
         `UPDATE contracts SET
           status = 'closed', closed_at = ?, return_at = ?, return_place = COALESCE(?, return_place),
           return_mileage = ?, return_fuel_level = ?,
-          return_notes = ?, return_damages = ?, extra_charges = ?, extra_charges_note = ?, total_amount = ?,
+          return_notes = ?, return_damages = ?, return_sketch = COALESCE(?, return_sketch),
+          extra_charges = ?, extra_charges_note = ?, total_amount = ?,
           end_date = ?, updated_at = ?
          WHERE id = ?`,
         [
@@ -1654,6 +1666,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
           data.return_fuel_level ?? existing.return_fuel_level,
           data.return_notes ?? existing.return_notes,
           return_damages,
+          data.return_sketch ?? null,
           extra_charges,
           data.extra_charges_note ?? existing.extra_charges_note,
           total_amount,
@@ -1715,7 +1728,8 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
         `UPDATE contracts SET
           return_at = ?, return_place = COALESCE(?, return_place),
           return_mileage = ?, return_fuel_level = ?,
-          return_notes = ?, return_damages = ?, end_date = ?, updated_at = ?
+          return_notes = ?, return_damages = ?, return_sketch = COALESCE(?, return_sketch),
+          end_date = ?, updated_at = ?
          WHERE id = ?`,
         [
           return_at,
@@ -1724,6 +1738,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
           data.return_fuel_level ?? existing.return_fuel_level,
           data.return_notes ?? existing.return_notes,
           return_damages,
+          data.return_sketch ?? null,
           datePart(return_at),
           t,
           id,

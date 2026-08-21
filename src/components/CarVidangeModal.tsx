@@ -173,7 +173,7 @@ export function CarVidangeModal({
           <p className="muted-text">{t.vidangeExpenseAutoHint}</p>
         </div>
 
-        <footer className="form-actions">
+        <footer className="form-actions form-actions--sticky">
           <button type="button" className="btn secondary" onClick={onClose} disabled={saving}>
             {t.cancel}
           </button>

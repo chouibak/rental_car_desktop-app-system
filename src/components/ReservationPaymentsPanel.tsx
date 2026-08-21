@@ -464,7 +464,7 @@ export function ReservationPaymentsPanel({
 
               {error && <div className="error payment-modal-error">{error}</div>}
 
-              <footer className="form-actions">
+              <footer className="form-actions form-actions--sticky">
                 <button type="button" className="btn secondary" onClick={() => setOpen(false)}>
                   {t.cancel}
                 </button>

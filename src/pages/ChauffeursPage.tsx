@@ -71,7 +71,7 @@ export default function ChauffeursPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>{t.name}</th>
+                <th>{t.fullName}</th>
                 <th>{t.phone}</th>
                 <th>{t.cin}</th>
                 <th>{t.licenseExpiry}</th>

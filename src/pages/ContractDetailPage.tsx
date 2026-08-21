@@ -10,6 +10,7 @@ import {
   IconReceipt,
   IconTrash,
 } from '../components/icons'
+import { CarDamageDiagram } from '../components/CarDamageDiagram'
 import { ContractDamagesView } from '../components/ContractDamagesView'
 import { ContractHandoverForm } from '../components/ContractHandoverModal'
 import { CarStatusBadge, EmptyState, PaymentBadge, StatCard, StatusBadge } from '../components/ui'
@@ -1054,6 +1055,7 @@ export default function ContractDetailPage() {
                 ) : null}
                 <div className="info-item" style={{ gridColumn: '1 / -1' }}>
                   <span>{t.observedDamages}</span>
+                  <CarDamageDiagram damages={departureDamages} t={t} readOnly />
                   <ContractDamagesView damages={departureDamages} t={t} compact />
                 </div>
               </div>
@@ -1107,6 +1109,7 @@ export default function ContractDetailPage() {
                   ) : null}
                   <div className="info-item" style={{ gridColumn: '1 / -1' }}>
                     <span>{t.observedDamages}</span>
+                    <CarDamageDiagram damages={returnDamages} t={t} readOnly />
                     <ContractDamagesView damages={returnDamages} t={t} compact />
                   </div>
                 </div>
@@ -1197,7 +1200,7 @@ export default function ContractDetailPage() {
                   </div>
                   {extendError ? <p className="field full settings-error">{extendError}</p> : null}
                 </div>
-                <div className="form-actions">
+                <div className="form-actions form-actions--sticky">
                   <button
                     className="btn"
                     type="submit"

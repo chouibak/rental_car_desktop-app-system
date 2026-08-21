@@ -169,7 +169,6 @@ export default function ReservationDetailPage() {
     { label: t.dailyPrice, value: money(reservation.daily_rate) },
     { label: t.total, value: money(reservation.total_amount) },
     { label: t.deposit, value: money(reservation.deposit_amount) },
-    { label: t.depositStatus, value: t[reservation.deposit_status] },
     { label: t.deliveryLocation, value: deliveryLocationLabel(reservation.delivery_location, t) },
   ]
 

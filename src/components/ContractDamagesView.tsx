@@ -68,9 +68,11 @@ export function ContractDamagesView({ damages, t, compact = false }: ContractDam
   return (
     <div className={`contract-damages-grid${compact ? ' is-compact' : ''}`}>
       {damages.map((damage, index) => (
-        <div className="contract-damage-card" key={`${damage.part}-${damage.type}-${index}`}>
+        <div className="contract-damage-card" key={damage.id || `${damage.part}-${damage.type}-${index}`}>
           <div className="contract-damage-card-head">
-            <strong>{t[`part_${damage.part}` as keyof Dict] || damage.part}</strong>
+            <strong>
+              {index + 1}. {t[`part_${damage.part}` as keyof Dict] || damage.part}
+            </strong>
             <span className="contract-damage-type">{t[`damage_${damage.type}` as keyof Dict] || damage.type}</span>
           </div>
           {damage.note?.trim() ? <p className="muted-text">{damage.note}</p> : null}

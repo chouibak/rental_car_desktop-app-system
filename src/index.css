@@ -138,7 +138,7 @@ a {
 
 .content {
   margin-inline-start: 240px;
-  padding: 28px 32px 40px;
+  padding: 28px 32px 80px;
   max-width: calc(1400px + 240px);
   min-height: 100vh;
   transition: margin-inline-start 0.22s ease;
@@ -979,6 +979,32 @@ th {
 .contract-form--admin {
   display: grid;
   gap: 14px;
+}
+
+.contract-identity-grid {
+  gap: 12px 16px;
+}
+
+.contract-identity-grid .contract-linked-lock-hint {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+}
+
+.contract-identity-grid .contract-city-span {
+  grid-column: span 2;
+}
+
+@media (max-width: 900px) {
+  .contract-identity-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .contract-identity-grid .contract-city-span {
+    grid-column: auto;
+  }
 }
 
 .contract-admin-section {
@@ -2144,6 +2170,176 @@ th {
   gap: 12px;
 }
 
+.damage-item-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.car-damage-diagram {
+  display: grid;
+  gap: 10px;
+}
+
+.car-damage-diagram-header {
+  display: grid;
+  gap: 4px;
+}
+
+.car-damage-diagram-header .muted-text {
+  font-size: 0.75rem;
+}
+
+.car-damage-diagram-stage {
+  position: relative;
+  width: min(100%, 520px);
+  aspect-ratio: 1 / 1;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+  cursor: crosshair;
+  user-select: none;
+  touch-action: none;
+}
+
+.car-damage-diagram-stage.is-readonly {
+  cursor: default;
+}
+
+.car-damage-diagram-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.car-damage-marker {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid #fff;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.35);
+  padding: 0;
+}
+
+.car-damage-marker:disabled {
+  opacity: 1;
+}
+
+/* pending click dot */
+.damage-pending-dot {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: rgba(15, 23, 42, 0.25);
+  border: 2px dashed rgba(15, 23, 42, 0.45);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+/* damage type picker popup */
+.damage-type-picker {
+  position: absolute;
+  z-index: 30;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18);
+  padding: 12px 12px 10px;
+  min-width: 180px;
+  transform: translate(-50%, -110%);
+}
+
+.damage-type-picker-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+  text-align: center;
+}
+
+.damage-type-picker-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.damage-type-picker-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  border-radius: 9px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: opacity 0.12s, transform 0.1s;
+  text-align: left;
+}
+
+.damage-type-picker-btn:hover {
+  opacity: 0.88;
+  transform: scale(1.04);
+}
+
+.damage-type-picker-letter {
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #fff;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.25);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.damage-type-picker-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.damage-type-picker-cancel {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 5px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: center;
+}
+
+.damage-type-picker-cancel:hover {
+  background: var(--bg);
+  color: var(--ink);
+}
+
 .damage-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
@@ -2318,6 +2514,105 @@ th {
   font-size: 0.7rem;
   font-weight: 700;
   color: #c0392b;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+}
+
+/* ── Car sketch (freehand drawing) ── */
+
+.car-sketch-wrap {
+  display: grid;
+  gap: 10px;
+  max-width: 520px;
+}
+
+.car-sketch-stage {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  line-height: 0;
+  user-select: none;
+  border: 1px solid var(--border);
+}
+
+.car-sketch-bg {
+  width: 100%;
+  display: block;
+  pointer-events: none;
+}
+
+.car-sketch-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+.car-sketch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.car-sketch-colors {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.car-sketch-color {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2.5px solid transparent;
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.car-sketch-color.active {
+  border-color: var(--primary);
+  transform: scale(1.25);
+}
+
+.car-sketch-color:hover:not(.active) {
+  transform: scale(1.1);
+}
+
+.car-sketch-sizes {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.car-sketch-size {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, border-color 0.1s;
+  padding: 0;
+}
+
+.car-sketch-size.active,
+.car-sketch-size:hover {
+  background: var(--surface);
+  border-color: var(--primary);
+}
+
+.car-sketch-clear {
+  margin-left: auto;
 }
 
 @media (max-width: 900px) {
@@ -2325,6 +2620,8 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+/* remove old popup styles */
 
 @media (max-width: 900px) {
   .form-grid-3 {
@@ -2856,16 +3153,44 @@ th {
 }
 
 .form-actions--sticky {
+  position: fixed;
+  bottom: 0;
+  left: 240px;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 32px;
+  background: #ffffff;
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.app-shell.sidebar-collapsed .form-actions--sticky {
+  left: 0;
+}
+
+[dir='rtl'] .form-actions--sticky {
+  left: 0;
+  right: 240px;
+}
+
+[dir='rtl'] .app-shell.sidebar-collapsed .form-actions--sticky {
+  right: 0;
+}
+
+/* Inside modals, keep footer sticky within the modal panel */
+.modal .form-actions--sticky,
+.modal-backdrop .form-actions--sticky {
   position: sticky;
-  bottom: 12px;
-  z-index: 6;
-  margin-top: 8px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
-  backdrop-filter: blur(6px);
+  bottom: 0;
+  left: auto;
+  right: auto;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 14px 14px;
+  box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.08);
+  padding: 12px 20px;
 }
 
 .car-form-actions {
@@ -4217,9 +4542,8 @@ th {
 }
 
 .settings-form-footer {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
+  padding: 0;
+  border-radius: 0;
 }
 
 .settings-saved {
@@ -5263,12 +5587,7 @@ th {
 }
 
 .handover-inline-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding-top: 12px;
-  margin-top: 4px;
-  border-top: 1px solid var(--line);
+  border-radius: 0;
 }
 
 @media (max-width: 900px) {

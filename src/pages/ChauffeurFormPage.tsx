@@ -189,7 +189,7 @@ export default function ChauffeurFormPage() {
           <h3 className="section-title">{t.details}</h3>
           <div className="form-grid">
             <div className="field">
-              <label>{t.name}</label>
+              <label>{t.fullName}</label>
               <input
                 className="input"
                 required
@@ -325,7 +325,7 @@ export default function ChauffeurFormPage() {
 
         {error && <div className="error">{error}</div>}
 
-        <div className="form-actions">
+        <div className="form-actions form-actions--sticky">
           <button type="button" className="btn secondary" onClick={() => navigate('/chauffeurs')}>
             {t.cancel}
           </button>

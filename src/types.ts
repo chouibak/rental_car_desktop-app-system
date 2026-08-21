@@ -282,6 +282,8 @@ export type Contract = {
   equipment_other?: string
   departure_damages?: string
   return_damages?: string
+  departure_sketch?: string | null
+  return_sketch?: string | null
   include_damage_photos_in_pdf?: number
   daily_rate?: number
   deposit_amount?: number
@@ -320,9 +322,12 @@ export type Contract = {
 }
 
 export type ContractDamage = {
+  id?: string
   part: string
   type: string
   note: string
+  x?: number
+  y?: number
   photo?: string
   video?: string
 }
@@ -333,6 +338,8 @@ export type ContractInput = Partial<Omit<Contract, 'departure_damages' | 'return
   car_id?: number
   departure_damages?: string | ContractDamage[]
   return_damages?: string | ContractDamage[]
+  departure_sketch?: string
+  return_sketch?: string
 }
 
 export type ContractStats = {

@@ -176,7 +176,7 @@ export default function CustomerFormPage() {
           <h3 className="section-title">{t.details}</h3>
           <div className="form-grid">
             <div className="field">
-              <label>{t.name}</label>
+              <label>{t.fullName}</label>
               <input
                 className="input"
                 required
@@ -302,7 +302,7 @@ export default function CustomerFormPage() {
 
         {error && <div className="error">{error}</div>}
 
-        <div className="form-actions">
+        <div className="form-actions form-actions--sticky">
           <button type="button" className="btn secondary" onClick={() => navigate(isEdit && customerId ? `/customers/${customerId}` : '/customers')}>
             {t.cancel}
           </button>

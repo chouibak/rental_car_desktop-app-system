@@ -110,6 +110,7 @@ type FormState = {
   equipment_other: string
   departure_damages: ContractDamage[]
   return_damages: ContractDamage[]
+  departure_sketch: string
   include_damage_photos_in_pdf: boolean
   daily_rate: number
   discount: number
@@ -184,6 +185,7 @@ function emptyForm(): FormState {
     equipment_other: '',
     departure_damages: [],
     return_damages: [],
+    departure_sketch: '',
     include_damage_photos_in_pdf: false,
     daily_rate: 0,
     discount: 0,
@@ -259,6 +261,7 @@ function contractToForm(contract: Contract, t: Dict): FormState {
     equipment_other: contract.equipment_other || '',
     departure_damages: parseDamages(contract.departure_damages),
     return_damages: parseDamages(contract.return_damages),
+    departure_sketch: contract.departure_sketch || '',
     include_damage_photos_in_pdf: Number(contract.include_damage_photos_in_pdf) === 1,
     daily_rate: contract.daily_rate ?? contract.daily_price ?? 0,
     discount: contract.discount ?? 0,
@@ -578,6 +581,7 @@ export default function ContractFormPage() {
     equipment: JSON.stringify(form.equipment),
     departure_damages: JSON.stringify(form.departure_damages),
     return_damages: JSON.stringify(form.return_damages),
+    departure_sketch: form.departure_sketch || undefined,
     include_damage_photos_in_pdf: form.include_damage_photos_in_pdf ? 1 : 0,
     franchise_applies: form.franchise_applies || form.franchise_amount > 0 ? 1 : 0,
     vat_applies: form.vat_applies ? 1 : 0,
@@ -686,28 +690,43 @@ export default function ContractFormPage() {
 
       <form className="contract-form contract-form--admin" onSubmit={onSubmit}>
         <ContractSection step={1} title={t.contractIdentity} subtitle={t.contractIdentityHint}>
-          {!isEdit ? (
-            <div className="field">
-              <label>{t.reservationRef}</label>
-              <p className="field-hint">{t.linkReservationHint}</p>
-              <select className="select" value={form.reservation_id} onChange={(e) => onReservationChange(e.target.value)}>
-                <option value="">{t.selectReservation}</option>
-                {reservationOptions.map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.reference} — {row.customer_name} — {row.car_name}
-                  </option>
-                ))}
-              </select>
-              {reservations.length === 0 && !pinnedReservation ? (
-                <span className="field-hint">{t.noReservationForContract}</span>
-              ) : null}
-            </div>
-          ) : null}
+          <div className="form-grid form-grid-3 contract-identity-grid">
+            {!isEdit ? (
+              <div className="field full">
+                <label>{t.reservationRef}</label>
+                <p className="field-hint">{t.linkReservationHint}</p>
+                <select className="select" value={form.reservation_id} onChange={(e) => onReservationChange(e.target.value)}>
+                  <option value="">{t.selectReservation}</option>
+                  {reservationOptions.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.reference} — {row.customer_name} — {row.car_name}
+                    </option>
+                  ))}
+                </select>
+                {reservations.length === 0 && !pinnedReservation ? (
+                  <span className="field-hint">{t.noReservationForContract}</span>
+                ) : null}
+              </div>
+            ) : (
+              <div className="field full">
+                <label>{t.reservationRef}</label>
+                <select className="select" value={form.reservation_id} onChange={(e) => onReservationChange(e.target.value)}>
+                  <option value="">{t.selectReservation}</option>
+                  {reservationOptions.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.reference} — {row.customer_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
-          <div className="form-grid">
+            {reservationLinked ? (
+              <p className="field-hint full contract-linked-lock-hint">{t.reservationLinkedFieldsLocked}</p>
+            ) : null}
+
             <div className="field">
               <label>{t.customer} *</label>
-              {reservationLinked ? <p className="field-hint">{t.reservationLinkedFieldsLocked}</p> : null}
               <select
                 className="select"
                 required
@@ -723,6 +742,7 @@ export default function ContractFormPage() {
                 ))}
               </select>
             </div>
+
             <div className="field">
               <label>{t.car} *</label>
               <select
@@ -740,20 +760,7 @@ export default function ContractFormPage() {
                 ))}
               </select>
             </div>
-            {isEdit ? (
-              <div className="field">
-                <label>{t.contractNumber}</label>
-                <input className="input" value={contractNumber} readOnly />
-              </div>
-            ) : null}
-            <div className="field">
-              <label>{t.contractDate}</label>
-              <input className="input" type="date" value={form.contract_date} onChange={(e) => setForm({ ...form, contract_date: e.target.value })} />
-            </div>
-            <div className="field">
-              <label>{t.contractCity}</label>
-              <input className="input" value={form.contract_city} onChange={(e) => setForm({ ...form, contract_city: e.target.value })} />
-            </div>
+
             <div className="field">
               <label>{t.status}</label>
               <select className="select" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
@@ -764,17 +771,30 @@ export default function ContractFormPage() {
                 ))}
               </select>
             </div>
+
+            <div className="field">
+              <label>{t.contractDate}</label>
+              <input
+                className="input"
+                type="date"
+                value={form.contract_date}
+                onChange={(e) => setForm({ ...form, contract_date: e.target.value })}
+              />
+            </div>
+
+            <div className={`field${isEdit ? '' : ' contract-city-span'}`}>
+              <label>{t.contractCity}</label>
+              <input
+                className="input"
+                value={form.contract_city}
+                onChange={(e) => setForm({ ...form, contract_city: e.target.value })}
+              />
+            </div>
+
             {isEdit ? (
               <div className="field">
-                <label>{t.reservationRef}</label>
-                <select className="select" value={form.reservation_id} onChange={(e) => onReservationChange(e.target.value)}>
-                  <option value="">{t.selectReservation}</option>
-                  {reservationOptions.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.reference} — {row.customer_name}
-                    </option>
-                  ))}
-                </select>
+                <label>{t.contractNumber}</label>
+                <input className="input" value={contractNumber} readOnly />
               </div>
             ) : null}
           </div>
@@ -983,10 +1003,12 @@ export default function ContractFormPage() {
             fuelLevel={form.departure_fuel_level}
             notes={form.departure_notes}
             damages={form.departure_damages}
+            sketch={form.departure_sketch}
             onMileageChange={(departure_mileage) => setForm({ ...form, departure_mileage })}
             onFuelChange={(departure_fuel_level) => setForm({ ...form, departure_fuel_level })}
             onNotesChange={(departure_notes) => setForm({ ...form, departure_notes })}
             onDamagesChange={(departure_damages) => setForm({ ...form, departure_damages })}
+            onSketchChange={(departure_sketch) => setForm({ ...form, departure_sketch })}
             t={t}
           />
         </ContractSection>

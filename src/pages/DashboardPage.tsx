@@ -111,6 +111,21 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      <div className="panel dashboard-panel">
+        <div className="panel-header">
+          <div>
+            <h3>{t.topCarsUsage}</h3>
+            <p className="muted-text">{t.topCarsUsageHint}</p>
+          </div>
+          <Link className="btn secondary btn-sm" to="/cars">
+            {t.cars}
+          </Link>
+        </div>
+        <div className="panel-body">
+          <TopCarsUsageChart cars={charts.top_cars_usage} />
+        </div>
+      </div>
+
       <div className="dashboard-grid">
         <div className="panel dashboard-panel">
           <div className="panel-header">
@@ -141,21 +156,6 @@ export default function DashboardPage() {
             <FleetUtilizationGauge percent={charts.fleet_utilization_pct} />
             <FleetStatusDonut available={stats.available} rented={stats.rented} maintenance={stats.maintenance} />
           </div>
-        </div>
-      </div>
-
-      <div className="panel dashboard-panel">
-        <div className="panel-header">
-          <div>
-            <h3>{t.topCarsUsage}</h3>
-            <p className="muted-text">{t.topCarsUsageHint}</p>
-          </div>
-          <Link className="btn secondary btn-sm" to="/cars">
-            {t.cars}
-          </Link>
-        </div>
-        <div className="panel-body">
-          <TopCarsUsageChart cars={charts.top_cars_usage} />
         </div>
       </div>
 

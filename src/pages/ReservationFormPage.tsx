@@ -10,14 +10,12 @@ import type {
   Car,
   Chauffeur,
   Customer,
-  DepositStatus,
   PaymentStatus,
   ReservationStatus,
 } from '../types'
 
 const STATUSES: ReservationStatus[] = ['pending', 'confirmed', 'cancelled', 'completed']
 const PAYMENT_STATUSES: PaymentStatus[] = ['unpaid', 'partial', 'paid']
-const DEPOSIT_STATUSES: DepositStatus[] = ['pending', 'received', 'refunded']
 
 function toLocalDatetimeValue(iso?: string) {
   if (!iso) return ''
@@ -61,7 +59,7 @@ const emptyForm = () => ({
   message: '',
   daily_rate: 0,
   deposit_amount: 0,
-  deposit_status: 'pending' as DepositStatus,
+  deposit_status: 'pending' as const,
   status: 'confirmed' as ReservationStatus,
   payment_status: 'unpaid' as PaymentStatus,
   paid_amount: 0,
@@ -337,20 +335,6 @@ export default function ReservationFormPage() {
             />
           </div>
           <div className="field">
-            <label>{t.depositStatus}</label>
-            <select
-              className="select"
-              value={form.deposit_status}
-              onChange={(e) => setForm((f) => ({ ...f, deposit_status: e.target.value as DepositStatus }))}
-            >
-              {DEPOSIT_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {t[s]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
             <label>{t.status}</label>
             <select
               className="select"
@@ -426,7 +410,7 @@ export default function ReservationFormPage() {
 
         {error && <div className="error">{error}</div>}
 
-        <div className="form-actions">
+        <div className="form-actions form-actions--sticky">
           <button type="button" className="btn secondary" onClick={() => navigate('/reservations')}>
             {t.cancel}
           </button>

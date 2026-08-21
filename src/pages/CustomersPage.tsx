@@ -67,7 +67,7 @@ export default function CustomersPage() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>{t.name}</th>
+                <th>{t.fullName}</th>
                 <th>{t.phone}</th>
                 <th>{t.email}</th>
                 <th>{t.cin}</th>

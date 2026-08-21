@@ -246,7 +246,7 @@ export function CarExpenseModal({ open, carId, carLabel, expense, onClose, onSav
           </div>
         </div>
 
-        <footer className="form-actions">
+        <footer className="form-actions form-actions--sticky">
           <button type="button" className="btn secondary" onClick={onClose} disabled={saving}>
             {t.cancel}
           </button>
