@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { IconCalendar, IconChevronLeft, IconChevronRight } from './icons'
 import { useLang } from '../context/LangContext'
-import type { Car, Reservation } from '../types'
+import type { Car, Contract, Reservation } from '../types'
 import type { Dict } from '../i18n'
 import {
   addMonths,
@@ -18,6 +18,8 @@ type ReservationMonthCalendarProps = {
   onMonthChange: (month: Date) => void
   cars: Car[]
   reservations: Reservation[]
+  /** Contracts created directly (without a reservation) still need a calendar bar. */
+  contracts?: Contract[]
   thumbUrls: Record<number, string>
 }
 
@@ -32,6 +34,7 @@ export function ReservationMonthCalendar({
   onMonthChange,
   cars,
   reservations,
+  contracts = [],
   thumbUrls,
 }: ReservationMonthCalendarProps) {
   const { t, lang } = useLang()
@@ -57,26 +60,60 @@ export function ReservationMonthCalendar({
     })
   }, [totalDays, year, monthIndex, locale, today])
 
-  const visibleReservations = useMemo(
-    () => reservations.filter((r) => r.status !== 'cancelled'),
-    [reservations],
-  )
+  type CalendarBooking = {
+    id: string
+    carId: number
+    link: string
+    label: string
+    tone: 'completed' | 'pending' | 'confirmed' | 'cancelled'
+    pickup: string
+    return: string
+  }
+
+  const bookings = useMemo<CalendarBooking[]>(() => {
+    const fromReservations: CalendarBooking[] = reservations
+      .filter((r) => r.status !== 'cancelled')
+      .map((r) => ({
+        id: `reservation-${r.id}`,
+        carId: r.car_id,
+        link: `/reservations/${r.id}`,
+        label: r.customer_name || r.reference,
+        tone: (r.status === 'completed' ? 'completed' : r.status === 'pending' ? 'pending' : 'confirmed') as CalendarBooking['tone'],
+        pickup: r.pickup_date,
+        return: r.return_date,
+      }))
+
+    // Contracts created directly (no linked reservation) still need a bar of their own.
+    const fromContracts: CalendarBooking[] = contracts
+      .filter((c) => !c.reservation_id && c.status !== 'cancelled')
+      .map((c) => ({
+        id: `contract-${c.id}`,
+        carId: c.car_id,
+        link: `/contracts/${c.id}`,
+        label: c.client_name || c.contract_number,
+        tone: (c.status === 'closed' ? 'completed' : c.status === 'draft' ? 'pending' : 'confirmed') as CalendarBooking['tone'],
+        pickup: c.departure_at || c.start_date,
+        return: c.return_at || c.end_date,
+      }))
+
+    return [...fromReservations, ...fromContracts]
+  }, [reservations, contracts])
 
   const rows = useMemo(() => {
     return cars
       .map((car) => {
-        const bookings = visibleReservations
-          .filter((r) => r.car_id === car.id)
-          .map((reservation) => ({
-            reservation,
-            span: getReservationBarInMonth(reservation.pickup_date, reservation.return_date, year, monthIndex),
+        const carBookings = bookings
+          .filter((b) => b.carId === car.id)
+          .map((booking) => ({
+            booking,
+            span: getReservationBarInMonth(booking.pickup, booking.return, year, monthIndex),
           }))
           .filter((entry) => entry.span !== null)
 
-        return { car, bookings }
+        return { car, bookings: carBookings }
       })
-      .filter(({ bookings }) => bookings.length > 0)
-  }, [cars, visibleReservations, year, monthIndex])
+      .filter(({ bookings: carBookings }) => carBookings.length > 0)
+  }, [cars, bookings, year, monthIndex])
 
   const monthLabel = month.toLocaleDateString(locale, { month: 'long', year: 'numeric' })
 
@@ -142,26 +179,20 @@ export function ReservationMonthCalendar({
                 />
               ))}
 
-              {bookings.map(({ reservation, span }) => {
+              {bookings.map(({ booking, span }) => {
                 if (!span) return null
-                const tone =
-                  reservation.status === 'completed'
-                    ? 'completed'
-                    : reservation.status === 'pending'
-                      ? 'pending'
-                      : 'confirmed'
 
                 return (
                   <Link
-                    key={reservation.id}
-                    to={`/reservations/${reservation.id}`}
-                    className={`month-calendar-bar ${tone}`}
+                    key={booking.id}
+                    to={booking.link}
+                    className={`month-calendar-bar ${booking.tone}`}
                     style={{
                       gridColumn: `${span.startDay + 1} / ${span.endDay + 2}`,
                     }}
-                    title={`${reservation.customer_name || reservation.reference} · ${reservation.reference}`}
+                    title={booking.label}
                   >
-                    {reservation.customer_name || reservation.reference}
+                    {booking.label}
                   </Link>
                 )
               })}

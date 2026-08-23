@@ -13,6 +13,8 @@ const api = {
   pickCarPhoto: (carId?: number) => ipcRenderer.invoke('cars:pickPhoto', carId),
   pickCarPhotos: (carId?: number) => ipcRenderer.invoke('cars:pickPhotos', carId),
   pickCarDocument: (carId?: number) => ipcRenderer.invoke('cars:pickDocument', carId),
+  renewCarDocument: (carId: number, docType: string, data: unknown) =>
+    ipcRenderer.invoke('cars:renewDocument', carId, docType, data),
   deleteCarFile: (filePath: string) => ipcRenderer.invoke('cars:deleteFile', filePath),
   getCarFileUrl: (filePath: string) => ipcRenderer.invoke('cars:getFileUrl', filePath),
   openCarFile: (filePath: string) => ipcRenderer.invoke('cars:openFile', filePath),
@@ -23,6 +25,7 @@ const api = {
   createCustomer: (data: unknown) => ipcRenderer.invoke('customers:create', data),
   updateCustomer: (id: number, data: unknown) => ipcRenderer.invoke('customers:update', id, data),
   deleteCustomer: (id: number) => ipcRenderer.invoke('customers:delete', id),
+  getCustomerStats: () => ipcRenderer.invoke('customers:stats'),
   pickCustomerDocument: (customerId?: number) => ipcRenderer.invoke('customers:pickDocument', customerId),
   deleteCustomerFile: (filePath: string) => ipcRenderer.invoke('customers:deleteFile', filePath),
   openCustomerFile: (filePath: string) => ipcRenderer.invoke('customers:openFile', filePath),
@@ -34,6 +37,7 @@ const api = {
   applyReservationPaymentStatus: (id: number, data: unknown) =>
     ipcRenderer.invoke('reservations:applyPaymentStatus', id, data),
   deleteReservation: (id: number) => ipcRenderer.invoke('reservations:delete', id),
+  getReservationStats: () => ipcRenderer.invoke('reservations:stats'),
 
   listReservationPayments: (filters?: unknown) => ipcRenderer.invoke('reservation-payments:list', filters),
   getReservationPayment: (id: number) => ipcRenderer.invoke('reservation-payments:get', id),

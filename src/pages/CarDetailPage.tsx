@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { CarDocCard } from '../components/CarDocCard'
+import { CarDocumentHistoryModal } from '../components/CarDocumentHistoryModal'
+import { CarDocumentRenewModal } from '../components/CarDocumentRenewModal'
 import { CarExpenseModal } from '../components/CarExpenseModal'
 import { CarVidangeModal } from '../components/CarVidangeModal'
 import {
   IconCar,
+  IconCalendar,
   IconChevronLeft,
   IconEdit,
   IconEye,
@@ -17,22 +20,18 @@ import {
 import { EmptyState, PageHeader, StatCard } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import type { Dict } from '../i18n'
+import { isLiveContract } from '../utils/contracts'
 import { FUEL_FRACTION, formatContractDatetime } from '../utils/contracts'
 import { formatDisplayDate } from '../utils/customer'
 import { getDocExpiryInfo } from '../utils/docExpiry'
 import { formatNumber } from '../utils/money'
 import { computeVidangeStatus, formatKm, formatVidangeBadgeLabel, getVidangeTrafficLevel } from '../utils/vidange'
-import type { Car, CarComputedStatus, CarVidange, Expense, ExpenseCategory } from '../types'
+import type { Car, CarComputedStatus, CarDocType, CarVidange, Expense, ExpenseCategory } from '../types'
+import { CAR_DOC_SLOTS, historyForDocType } from '../utils/carDocuments'
 
 const STATUSES: CarComputedStatus[] = ['disponible', 'louee', 'hors_service']
 
-const DOC_FIELDS = [
-  { pathKey: 'doc_carte_grise_path', expiryKey: 'doc_carte_grise_expiry', labelKey: 'carteGrise', hasExpiry: false },
-  { pathKey: 'doc_assurance_path', expiryKey: 'doc_assurance_expiry', labelKey: 'assurance', hasExpiry: true },
-  { pathKey: 'doc_controle_technique_path', expiryKey: 'doc_controle_technique_expiry', labelKey: 'controleTechnique', hasExpiry: true },
-  { pathKey: 'doc_vignette_path', expiryKey: 'doc_vignette_expiry', labelKey: 'vignette', hasExpiry: true },
-  { pathKey: 'doc_autorisation_path', expiryKey: 'doc_autorisation_expiry', labelKey: 'autorisation', hasExpiry: true },
-] as const
+const DOC_FIELDS = CAR_DOC_SLOTS.filter((slot) => slot.hasExpiry)
 
 const EXPENSE_CATEGORY_KEYS: Record<ExpenseCategory, keyof Dict> = {
   fuel: 'expenseFuel',
@@ -75,6 +74,9 @@ export default function CarDetailPage() {
   const [intervalKm, setIntervalKm] = useState(10000)
   const [intervalMonths, setIntervalMonths] = useState(6)
   const [savingInterval, setSavingInterval] = useState(false)
+  const [historyModal, setHistoryModal] = useState<{ docType: CarDocType; label: string } | null>(null)
+  const [renewModal, setRenewModal] = useState<{ docType: CarDocType; label: string; path: string } | null>(null)
+  const [currentContractId, setCurrentContractId] = useState<number | null>(null)
 
   const loadExpenses = useCallback(async (carId: number) => {
     const list = await window.api.listExpenses({ car_id: carId })
@@ -133,6 +135,15 @@ export default function CarDetailPage() {
         setPhotoUrls((prev) => ({ ...prev, [data.thumbnail!]: thumbUrl }))
         setActivePhoto(data.thumbnail)
       }
+
+      const contracts = await window.api.listContracts({ car_id: carId, archived: false })
+      if (stale) return
+      const liveContracts = contracts.filter(isLiveContract)
+      const activeContract =
+        liveContracts.find((contract) => contract.status === 'active') ??
+        liveContracts.find((contract) => contract.status === 'draft') ??
+        liveContracts[0]
+      setCurrentContractId(activeContract?.id ?? null)
     }).catch(() => {
       if (!stale) navigate('/cars')
     })
@@ -195,13 +206,33 @@ export default function CarDetailPage() {
   const docsAlertCount = useMemo(() => {
     if (!car) return 0
     return DOC_FIELDS.reduce((count, doc) => {
-      if (!doc.hasExpiry) return count
-      const expiry = car[doc.expiryKey]
-      if (!expiry?.trim()) return count
+      const expiry = doc.expiryKey ? car[doc.expiryKey] : undefined
+      if (!expiry || typeof expiry !== 'string' || !expiry.trim()) return count
       const info = getDocExpiryInfo(expiry)
       if (!info) return count
       return info.severity === 'critical' || info.severity === 'high' ? count + 1 : count
     }, 0)
+  }, [car])
+
+  const docsSummary = useMemo(() => {
+    if (!car) return { uploaded: 0, attention: 0, valid: 0 }
+    let uploaded = 0
+    let attention = 0
+    let valid = 0
+
+    for (const slot of CAR_DOC_SLOTS) {
+      const path = String(car[slot.pathKey] ?? '').trim()
+      if (path) uploaded += 1
+
+      if (!slot.hasExpiry || !slot.expiryKey) continue
+      const expiry = String(car[slot.expiryKey] ?? '')
+      const info = getDocExpiryInfo(expiry)
+      if (!info) continue
+      if (info.severity === 'ok' || info.severity === 'low') valid += 1
+      else attention += 1
+    }
+
+    return { uploaded, attention, valid }
   }, [car])
 
   const vidangeStatusLabel =
@@ -257,6 +288,60 @@ export default function CarDetailPage() {
     } catch {
       alert(t.cannotOpenDocument)
     }
+  }
+
+  const onRenewDocument = async (docType: CarDocType, label: string, hasExpiry: boolean) => {
+    if (!car) return
+    try {
+      const picked = await window.api.pickCarDocument(car.id)
+      if (!picked) return
+      if (hasExpiry) {
+        setRenewModal({ docType, label, path: picked.path })
+        return
+      }
+      const updated = await window.api.renewCarDocument(car.id, docType, { path: picked.path })
+      setCar(updated)
+    } catch {
+      alert(t.cannotSaveDocument)
+    }
+  }
+
+  const onConfirmRenew = async (expiry: string) => {
+    if (!car || !renewModal) return
+    try {
+      const updated = await window.api.renewCarDocument(car.id, renewModal.docType, {
+        path: renewModal.path,
+        expiry,
+      })
+      setCar(updated)
+      setRenewModal(null)
+    } catch {
+      alert(t.cannotSaveDocument)
+    }
+  }
+
+  const renderDocumentCard = (slot: (typeof CAR_DOC_SLOTS)[number]) => {
+    if (!car) return null
+    const filePath = String(car[slot.pathKey] ?? '')
+    const expiry = slot.expiryKey ? String(car[slot.expiryKey] ?? '') : undefined
+    const historyItems = historyForDocType(car.document_history, slot.docType)
+    return (
+      <CarDocCard
+        key={slot.docType}
+        label={t[slot.labelKey]}
+        filePath={filePath}
+        expiry={expiry}
+        viewLabel={t.viewShort}
+        renewLabel={t.renewDocument}
+        historyLabel={t.documentHistory}
+        noDataLabel={t.noData}
+        expiryDateLabel={t.expiryDate}
+        historyCount={historyItems.length}
+        onOpen={() => onOpenDocument(filePath)}
+        onRenew={() => onRenewDocument(slot.docType, t[slot.labelKey], slot.hasExpiry)}
+        onHistory={() => setHistoryModal({ docType: slot.docType, label: t[slot.labelKey] })}
+      />
+    )
   }
 
   const onStatusChange = async (status: CarComputedStatus) => {
@@ -388,6 +473,10 @@ export default function CarDetailPage() {
     { label: t.status, value: t[carStatus as keyof typeof t] ?? carStatus },
   ]
 
+  const newContractTo = `/contracts/new?car=${car.id}`
+  const newReservationTo = `/reservations/new?car=${car.id}`
+  const returnContractTo = currentContractId ? `/contracts/${currentContractId}?tab=reprise` : ''
+
   const tabs: Array<{
     id: CarDetailTab
     label: string
@@ -438,12 +527,28 @@ export default function CarDetailPage() {
             {t.back}
           </Link>
         </div>
+        <div className="toolbar-actions">
+          <Link className="btn secondary sm" to={newReservationTo}>
+            <IconCalendar size={15} />
+            {t.newReservation}
+          </Link>
+          <Link className="btn secondary sm" to={newContractTo}>
+            <IconFile size={15} />
+            {t.newContract}
+          </Link>
+          {carStatus === 'louee' && currentContractId ? (
+            <Link className="btn sm" to={returnContractTo}>
+              <IconReceipt size={15} />
+              {t.contractTabReturn}
+            </Link>
+          ) : null}
+        </div>
         <div className="toolbar-manage">
-          <Link className="btn btn-edit" to={`/cars/${car.id}/edit`}>
+          <Link className="btn secondary" to={`/cars/${car.id}/edit`}>
             <IconEdit size={16} />
             {t.edit}
           </Link>
-          <button type="button" className="btn danger" onClick={onDelete}>
+          <button type="button" className="btn danger outline" onClick={onDelete}>
             <IconTrash size={15} />
             {t.delete}
           </button>
@@ -560,35 +665,71 @@ export default function CarDetailPage() {
         )}
 
         {activeTab === 'documents' && (
-          <div className="panel car-detail-panel">
-            <div className="panel-header">
+          <div className="panel car-detail-panel car-documents-panel">
+            <div className="panel-header car-documents-header">
               <div>
                 <h3>{t.documents}</h3>
-                {docsAlertCount > 0 ? (
-                  <p className="panel-subtitle car-detail-alert-hint">
-                    {docsAlertCount} {t.documents.toLowerCase()}
-                  </p>
+                <p className="panel-subtitle">
+                  {docsSummary.uploaded} / {CAR_DOC_SLOTS.length} {t.documentsUploaded}
+                </p>
+              </div>
+              <div className="car-doc-summary">
+                {docsSummary.attention > 0 ? (
+                  <span className="car-doc-summary-pill car-doc-summary-pill--warn">
+                    {docsSummary.attention} {t.documentsNeedAttention}
+                  </span>
+                ) : docsSummary.valid > 0 ? (
+                  <span className="car-doc-summary-pill car-doc-summary-pill--ok">{t.documentsAllValid}</span>
                 ) : null}
               </div>
             </div>
             <div className="panel-body">
               <div className="car-doc-list">
-                {DOC_FIELDS.map((doc) => (
-                  <CarDocCard
-                    key={doc.pathKey}
-                    label={t[doc.labelKey]}
-                    filePath={car[doc.pathKey]}
-                    expiry={doc.hasExpiry ? car[doc.expiryKey] : undefined}
-                    viewLabel={t.viewDocument}
-                    noDataLabel={t.noData}
-                    expiryDateLabel={t.expiryDate}
-                    onOpen={() => onOpenDocument(car[doc.pathKey])}
-                  />
-                ))}
+                <section className="car-doc-group car-doc-group--carte-grise">
+                  <header className="car-doc-group-header">
+                    <div className="car-doc-group-icon" aria-hidden>
+                      <IconFile size={18} />
+                    </div>
+                    <div>
+                      <h4 className="car-doc-group-title">{t.carteGrise}</h4>
+                      <p className="car-doc-group-subtitle">{t.carteGriseDoc1} · {t.carteGriseDoc2}</p>
+                    </div>
+                  </header>
+                  <div className="car-doc-group-grid">
+                    {CAR_DOC_SLOTS.filter((slot) => slot.group === 'carte_grise').map(renderDocumentCard)}
+                  </div>
+                </section>
+
+                <div className="car-doc-grid">
+                  {CAR_DOC_SLOTS.filter((slot) => !slot.group).map(renderDocumentCard)}
+                </div>
               </div>
             </div>
           </div>
         )}
+
+        <CarDocumentHistoryModal
+          open={Boolean(historyModal && car)}
+          title={`${t.documentHistoryTitle} — ${historyModal?.label ?? ''}`}
+          baseLabel={historyModal?.label ?? ''}
+          items={historyModal && car ? historyForDocType(car.document_history, historyModal.docType) : []}
+          viewLabel={t.viewShort}
+          emptyLabel={t.noDocumentHistory}
+          expiryDateLabel={t.expiryDate}
+          closeLabel={t.cancel}
+          onClose={() => setHistoryModal(null)}
+          onOpen={onOpenDocument}
+        />
+
+        <CarDocumentRenewModal
+          open={Boolean(renewModal)}
+          title={`${t.renewDocumentTitle} — ${renewModal?.label ?? ''}`}
+          expiryDateLabel={t.expiryDate}
+          cancelLabel={t.cancel}
+          saveLabel={t.save}
+          onClose={() => setRenewModal(null)}
+          onConfirm={onConfirmRenew}
+        />
 
         {activeTab === 'vidange' && (
           <div className="panel car-detail-panel">

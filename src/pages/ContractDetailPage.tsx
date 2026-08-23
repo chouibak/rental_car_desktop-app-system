@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   IconCalendar,
   IconCar,
@@ -24,6 +24,12 @@ import { deliveryPlaceForDisplay } from '../utils/reservation'
 import { todayYmd } from '../utils/calendar'
 
 type ContractTab = 'overview' | 'livraison' | 'reprise' | 'prolongation'
+
+const CONTRACT_TABS: ContractTab[] = ['overview', 'livraison', 'reprise', 'prolongation']
+
+function isContractTab(value: string | null): value is ContractTab {
+  return Boolean(value && CONTRACT_TABS.includes(value as ContractTab))
+}
 
 function display(value: string | number | null | undefined) {
   if (value === null || value === undefined) return '—'
@@ -56,6 +62,7 @@ function fuelLabel(level?: string) {
 export default function ContractDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { t, money } = useLang()
   const { showSuccess } = useToast()
   const [contract, setContract] = useState<Contract | null>(null)
@@ -63,7 +70,10 @@ export default function ContractDetailPage() {
   const [carThumbUrl, setCarThumbUrl] = useState('')
   const [pdfOpen, setPdfOpen] = useState(false)
   const [pdfSaving, setPdfSaving] = useState(false)
-  const [activeTab, setActiveTab] = useState<ContractTab>('overview')
+  const [activeTab, setActiveTab] = useState<ContractTab>(() => {
+    const tab = searchParams.get('tab')
+    return isContractTab(tab) ? tab : 'overview'
+  })
   const [extendSaving, setExtendSaving] = useState(false)
   const [extendError, setExtendError] = useState('')
   const [extendForm, setExtendForm] = useState({
@@ -111,6 +121,11 @@ export default function ContractDetailPage() {
     // A missing or unreadable contract must not leave the page spinning forever.
     load().catch(() => navigate('/contracts'))
   }, [id])
+
+  useEffect(() => {
+    const tab = searchParams.get('tab')
+    setActiveTab(isContractTab(tab) ? tab : 'overview')
+  }, [searchParams, id])
 
   useEffect(() => {
     if (!contract) return
@@ -269,21 +284,25 @@ export default function ContractDetailPage() {
     },
   ]
 
-  const doExtend = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!contract || !extendPreview) return
+  /**
+   * Persists the pending extension_days change to the contract.
+   * Returns the amount still owed after saving (so callers can safely
+   * prefill a payment form against the real, up-to-date total), or
+   * `null` if nothing was saved (validation failure or no-op).
+   */
+  const saveExtension = async (): Promise<number | null> => {
+    if (!contract || !extendPreview) return null
     setExtendError('')
     if (!Number.isFinite(extendForm.extension_days) || extendForm.extension_days < 0) {
       setExtendError(t.invalidExtensionDays)
-      return
+      return null
     }
     if (extendPreview.unchanged) {
-      setExtendError(t.extensionUnchanged)
-      return
+      return Math.max(0, Number(extendPreview.newRemaining) || 0)
     }
     if (extendForm.extension_days < 1 && extendPreview.currentExtension < 1) {
       setExtendError(t.invalidExtensionDays)
-      return
+      return null
     }
     setExtendSaving(true)
     try {
@@ -297,20 +316,49 @@ export default function ContractDetailPage() {
       setExtendForm({ extension_days: targetDays, note: '' })
       await load()
       showSuccess(targetDays < 1 ? t.extensionRemoveSuccess : t.extendSaveSuccess)
-      if (
-        targetDays > extendPreview.currentExtension &&
-        extraToCollect > 0.001 &&
-        (contract.status === 'active' || contract.status === 'draft' || contract.status === 'closed')
-      ) {
-        openPayForm(extraToCollect, true)
-      }
+      return extraToCollect
     } catch (err) {
       const shown = mapAppError(err, t)
       setExtendError(shown)
       alert(shown)
+      return null
     } finally {
       setExtendSaving(false)
     }
+  }
+
+  const doExtend = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!contract || !extendPreview) return
+    const currentExtension = extendPreview.currentExtension
+    const targetDays = Math.floor(extendForm.extension_days)
+    const extraToCollect = await saveExtension()
+    if (
+      extraToCollect !== null &&
+      targetDays > currentExtension &&
+      extraToCollect > 0.001 &&
+      (contract.status === 'active' || contract.status === 'draft' || contract.status === 'closed')
+    ) {
+      openPayForm(extraToCollect, true)
+    }
+  }
+
+  /**
+   * Handles the "Ajouter un paiement" shortcut on the Prolongation tab.
+   * If there is an unsaved extension change, it must be saved first so the
+   * contract's real total reflects the extension cost — otherwise the
+   * payment amount (based on the preview total) would exceed the amount
+   * actually stored on the contract and get rejected by the backend.
+   */
+  const openExtensionPayForm = async () => {
+    if (!contract || !extendPreview) return
+    if (extendPreview.dirty) {
+      const extraToCollect = await saveExtension()
+      if (extraToCollect === null) return
+      openPayForm(extraToCollect, true)
+      return
+    }
+    openPayForm(extendPreview.newRemaining > 0 ? extendPreview.newRemaining : summary?.remaining, true)
   }
 
   const doRemoveExtension = async () => {
@@ -538,7 +586,10 @@ export default function ContractDetailPage() {
             key={tab.id}
             type="button"
             className={`car-detail-tab ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => {
+              setActiveTab(tab.id)
+              if (id) navigate(`/contracts/${id}?tab=${tab.id}`, { replace: true })
+            }}
           >
             <span className="car-detail-tab-icon" aria-hidden>
               {tab.icon}
@@ -1146,14 +1197,8 @@ export default function ContractDetailPage() {
               <button
                 type="button"
                 className="btn btn-register sm"
-                onClick={() =>
-                  openPayForm(
-                    extendPreview.newRemaining > 0
-                      ? extendPreview.newRemaining
-                      : summary?.remaining,
-                    true,
-                  )
-                }
+                disabled={extendSaving}
+                onClick={() => openExtensionPayForm()}
               >
                 <IconPlus size={15} />
                 {t.addPayment}

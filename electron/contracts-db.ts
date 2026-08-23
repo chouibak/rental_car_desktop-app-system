@@ -532,6 +532,23 @@ function computeExtensionState(
   }
 }
 
+function syncLinkedReservationFranchise(
+  helpers: DbHelpers,
+  reservationId: number | null | undefined,
+  franchise_applies: number,
+  franchise_amount: number,
+) {
+  if (!reservationId) return
+  helpers.run(
+    `UPDATE reservations SET
+      franchise_applies = ?,
+      franchise_amount = ?,
+      updated_at = ?
+     WHERE id = ?`,
+    [franchise_applies, franchise_amount, helpers.now(), reservationId],
+  )
+}
+
 function syncLinkedReservationDates(
   helpers: DbHelpers,
   reservationId: number | null | undefined,
@@ -1275,6 +1292,12 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
         daily_rate: normalized.daily_rate,
         total_amount: normalized.total_amount,
       })
+      syncLinkedReservationFranchise(
+        helpers,
+        normalized.reservation_id,
+        normalized.franchise_applies,
+        normalized.franchise_amount,
+      )
 
       return this.getContract(id)
     },
@@ -1319,6 +1342,12 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
         daily_rate: Number(reservation.daily_rate ?? car.price_per_day),
         total_amount: Number(reservation.total_amount),
         deposit_amount: Number(reservation.deposit_amount ?? 0),
+        franchise_amount: Number(reservation.franchise_amount ?? settings.default_franchise_amount ?? 0),
+        franchise_applies:
+          Number(reservation.franchise_applies ?? 0) ||
+          Number(reservation.franchise_amount ?? settings.default_franchise_amount ?? 0) > 0
+            ? 1
+            : 0,
         vehicle_brand: car.brand,
         vehicle_model: car.model,
         vehicle_plate: car.plate_number,
@@ -1327,8 +1356,6 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
         departure_notes: car.condition_notes,
         vat_applies: 1,
         vat_rate: 20,
-        franchise_amount: Number(settings.default_franchise_amount ?? 0),
-        franchise_applies: Number(settings.default_franchise_amount ?? 0) > 0 ? 1 : 0,
         equipment: JSON.stringify([...DEFAULT_EQUIPMENT]),
         include_damage_photos_in_pdf: 0,
         ...driver,
@@ -1502,6 +1529,12 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
         daily_rate: normalized.daily_rate,
         total_amount: normalized.total_amount,
       })
+      syncLinkedReservationFranchise(
+        helpers,
+        normalized.reservation_id,
+        normalized.franchise_applies,
+        normalized.franchise_amount,
+      )
 
       const hasReturnState =
         normalized.status === 'closed' || Number(normalized.return_mileage ?? 0) > 0

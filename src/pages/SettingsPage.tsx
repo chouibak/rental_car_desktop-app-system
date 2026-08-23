@@ -534,6 +534,8 @@ export default function SettingsPage() {
 
             </div>
 
+            <span className="field-hint">{t.agencyLogoHint}</span>
+
           </div>
 
           <div className="field full">

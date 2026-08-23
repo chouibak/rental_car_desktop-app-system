@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ReservationMonthCalendar } from '../components/ReservationMonthCalendar'
 import { IconEdit, IconPlus, IconSearch, IconTrash } from '../components/icons'
-import { EmptyState, PageHeader, PaymentBadge, StatusBadge } from '../components/ui'
+import { EmptyState, PageHeader, PaymentBadge, StatCard, StatusBadge } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { monthBoundaryIsoRange, startOfMonth } from '../utils/calendar'
-import type { Car, Customer, Reservation, ReservationStatus } from '../types'
+import type { Car, Customer, Reservation, ReservationStats, ReservationStatus } from '../types'
 
 const STATUSES: ReservationStatus[] = ['pending', 'confirmed', 'cancelled', 'completed']
 
@@ -26,6 +26,7 @@ export default function ReservationsPage() {
   const locale = lang === 'ar' ? 'ar-MA' : 'fr-FR'
   const navigate = useNavigate()
   const [reservations, setReservations] = useState<Reservation[]>([])
+  const [stats, setStats] = useState<ReservationStats | null>(null)
   const [cars, setCars] = useState<Car[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [thumbUrls, setThumbUrls] = useState<Record<number, string>>({})
@@ -37,8 +38,9 @@ export default function ReservationsPage() {
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
 
   const calendarCars = useMemo(() => {
-    if (carId) return cars.filter((car) => car.id === carId)
-    return cars
+    const rented = cars.filter((car) => (car.computed_status ?? car.status) === 'louee')
+    if (carId) return rented.filter((car) => car.id === carId)
+    return rented
   }, [cars, carId])
 
   const load = async () => {
@@ -60,25 +62,24 @@ export default function ReservationsPage() {
       Object.assign(filters, monthBoundaryIsoRange(calendarMonth))
     }
 
-    const [list, carList, customerList] = await Promise.all([
+    const [list, carList, customerList, reservationStats] = await Promise.all([
       window.api.listReservations(filters),
       window.api.listCars(),
       window.api.listCustomers(),
+      window.api.getReservationStats(),
     ])
 
     setReservations(list)
+    setStats(reservationStats)
     setCars(carList)
     setCustomers(customerList)
 
     if (view === 'calendar') {
-      const rentedCarIds = new Set(
-        list.filter((reservation) => reservation.status !== 'cancelled').map((reservation) => reservation.car_id),
-      )
+      const rentedCars = carList.filter((car) => (car.computed_status ?? car.status) === 'louee')
+      const thumbCars = carId ? rentedCars.filter((car) => car.id === carId) : rentedCars
       const urls: Record<number, string> = {}
       await Promise.all(
-        carList
-          .filter((car) => rentedCarIds.has(car.id))
-          .map(async (car) => {
+        thumbCars.map(async (car) => {
             if (car.thumbnail) urls[car.id] = await window.api.getCarFileUrl(car.thumbnail)
           }),
       )
@@ -118,7 +119,7 @@ export default function ReservationsPage() {
             value={status}
             onChange={(e) => setStatus(e.target.value as ReservationStatus | '')}
           >
-            <option value="">{t.status}</option>
+            <option value="">{t.reservationStatus}</option>
             {STATUSES.map((s) => (
               <option key={s} value={s}>
                 {t[s]}
@@ -176,6 +177,24 @@ export default function ReservationsPage() {
         </div>
       </PageHeader>
 
+      {stats && (
+        <div className="cards cards--4">
+          <StatCard label={t.activeReservationsCount} value={stats.active} tone="info" />
+          <StatCard
+            label={t.unpaidStats}
+            value={money(stats.unpaid_amount)}
+            hint={
+              stats.unpaid_count > 0
+                ? `${stats.unpaid_count} ${t.unpaidReservationsCount.toLowerCase()}`
+                : t.fullyPaid
+            }
+            tone={stats.unpaid_amount > 0 ? 'warn' : 'success'}
+          />
+          <StatCard label={t.totalPaidAmount} value={money(stats.paid_amount)} tone="success" />
+          <StatCard label={t.totalReservationsCount} value={stats.total} />
+        </div>
+      )}
+
       {view === 'list' ? (
         <div className="panel">
           <div className="table-wrap">
@@ -189,7 +208,7 @@ export default function ReservationsPage() {
                   <th>{t.total}</th>
                   <th>{t.paidRental}</th>
                   <th>{t.remaining}</th>
-                  <th>{t.status}</th>
+                  <th>{t.reservationStatus}</th>
                   <th>{t.paymentStatus}</th>
                   <th className="col-actions">{t.actions}</th>
                 </tr>

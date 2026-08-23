@@ -37,6 +37,8 @@ function reservationUpdatePayload(reservation: Reservation, status: ReservationS
     daily_rate: reservation.daily_rate,
     deposit_amount: reservation.deposit_amount,
     deposit_status: reservation.deposit_status,
+    franchise_applies: reservation.franchise_applies,
+    franchise_amount: reservation.franchise_amount,
     status,
   }
 }
@@ -169,6 +171,13 @@ export default function ReservationDetailPage() {
     { label: t.dailyPrice, value: money(reservation.daily_rate) },
     { label: t.total, value: money(reservation.total_amount) },
     { label: t.deposit, value: money(reservation.deposit_amount) },
+    {
+      label: t.franchise,
+      value:
+        reservation.franchise_applies !== 0 && (reservation.franchise_amount ?? 0) > 0
+          ? money(reservation.franchise_amount ?? 0)
+          : '—',
+    },
     { label: t.deliveryLocation, value: deliveryLocationLabel(reservation.delivery_location, t) },
   ]
 
@@ -214,7 +223,7 @@ export default function ReservationDetailPage() {
         </div>
 
         <div className="toolbar-manage reservation-header-actions">
-          <div className="contract-status-switch" role="group" aria-label={t.status}>
+          <div className="contract-status-switch" role="group" aria-label={t.reservationStatus}>
             {RESERVATION_STATUSES.map((status) => (
               <button
                 key={status}

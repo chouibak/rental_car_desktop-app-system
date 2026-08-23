@@ -9,7 +9,11 @@ import {
   createCarsSchema,
   migrateCarsTable,
   migrateCarStatusColumn,
+  migrateCarCarteGrisePath2Column,
+  migrateCarDocumentHistoryTable,
   syncAllCarStatuses,
+  type CarDocType,
+  type CarDocumentRenewInput,
   type CarInput,
   type CarFilters,
 } from './cars-db'
@@ -23,6 +27,7 @@ import {
 import {
   createReservationsApi,
   createReservationsSchema,
+  migrateReservationsTable,
   type ReservationFilters,
   type ReservationInput,
   type PaymentStatus,
@@ -322,12 +327,15 @@ export async function initDb(userDataPath: string) {
   migrateCarsTable(db, dbHelpers())
   createCarsSchema(db)
   migrateCarStatusColumn(db, dbHelpers())
+  migrateCarCarteGrisePath2Column(db, dbHelpers())
+  migrateCarDocumentHistoryTable(db, dbHelpers())
   migrateCarVidangeColumns(db, dbHelpers())
   createVidangeSchema(db)
   createCustomersSchema(db)
   migrateCustomersTable(db, dbHelpers())
   migrateClientsToCustomers(db, dbHelpers())
   createReservationsSchema(db)
+  migrateReservationsTable(db, dbHelpers())
   createReservationPaymentsSchema(db)
   createSupportSchema(db)
   migrateContractsTable(db, dbHelpers())
@@ -405,8 +413,8 @@ export async function initDb(userDataPath: string) {
 }
 
 export type { CarInput, CarFilters } from './cars-db'
-export type { CustomerInput } from './customers-db'
-export type { ReservationInput, ReservationFilters } from './reservations-db'
+export type { CustomerInput, CustomerStats } from './customers-db'
+export type { ReservationInput, ReservationFilters, ReservationStats } from './reservations-db'
 export type { ReservationPaymentInput, ReservationPaymentFilters } from './reservation-payments-db'
 export type { ContractInput, ContractFilters, CloseContractInput, DeliveryHandoverInput, ExtendContractInput, SetContractExtensionInput } from './contracts-db'
 export type { ExpenseInput, ExpenseFilters } from './expenses-db'
@@ -505,6 +513,8 @@ export function getDbApi() {
     getCar: (id: number) => carsApi.getCar(id),
     createCar: (data: CarInput) => carsApi.createCar(data),
     updateCar: (id: number, data: CarInput) => carsApi.updateCar(id, data),
+    renewCarDocument: (id: number, docType: CarDocType, data: CarDocumentRenewInput) =>
+      carsApi.renewCarDocument(id, docType, data),
     updateCarStatus: (id: number, status: import('./cars-db').CarComputedStatus) =>
       carsApi.updateCarStatus(id, status),
     deleteCar: (id: number) => carsApi.deleteCar(id),
@@ -515,6 +525,7 @@ export function getDbApi() {
     createCustomer: (data: CustomerInput) => customersApi.createCustomer(data),
     updateCustomer: (id: number, data: CustomerInput) => customersApi.updateCustomer(id, data),
     deleteCustomer: (id: number) => customersApi.deleteCustomer(id),
+    getCustomerStats: () => customersApi.getCustomerStats(),
 
     listClients(q?: string) {
       return customersApi.listCustomers(q).map((c) => ({
@@ -591,6 +602,7 @@ export function getDbApi() {
     getReservation: (id: number) => reservationsApi.getReservation(id),
     createReservation: (data: ReservationInput) => reservationsApi.createReservation(data),
     updateReservation: (id: number, data: ReservationInput) => reservationsApi.updateReservation(id, data),
+    getReservationStats: () => reservationsApi.getReservationStats(),
     deleteReservation: (id: number) => {
       // A reservation that produced a live contract cannot be removed: the contract would
       // be left pointing at a row that no longer exists.

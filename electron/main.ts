@@ -219,6 +219,7 @@ function registerIpc() {
   ipcMain.handle('cars:get', (_e, id) => api.getCar(id))
   ipcMain.handle('cars:create', (_e, data) => api.createCar(data))
   ipcMain.handle('cars:update', (_e, id, data) => api.updateCar(id, data))
+  ipcMain.handle('cars:renewDocument', (_e, id, docType, data) => api.renewCarDocument(id, docType, data))
   ipcMain.handle('cars:updateStatus', (_e, id, status) => api.updateCarStatus(id, status))
   ipcMain.handle('cars:delete', (_e, id) => api.deleteCar(id))
   ipcMain.handle('cars:deleteImage', (_e, id) => api.deleteCarImage(id))
@@ -235,6 +236,7 @@ function registerIpc() {
   ipcMain.handle('customers:create', (_e, data) => api.createCustomer(data))
   ipcMain.handle('customers:update', (_e, id, data) => api.updateCustomer(id, data))
   ipcMain.handle('customers:delete', (_e, id) => api.deleteCustomer(id))
+  ipcMain.handle('customers:stats', () => api.getCustomerStats())
   ipcMain.handle('customers:pickDocument', (_e, customerId?: number) => pickCustomerDocument(win, customerId))
   ipcMain.handle('customers:deleteFile', (_e, filePath: string) => deleteCustomerFile(filePath))
   ipcMain.handle('customers:openFile', (_e, filePath: string) => openCustomerFile(filePath))
@@ -251,6 +253,7 @@ function registerIpc() {
   ipcMain.handle('reservations:update', (_e, id, data) => api.updateReservation(id, data))
   ipcMain.handle('reservations:applyPaymentStatus', (_e, id, data) => api.applyReservationPaymentStatus(id, data))
   ipcMain.handle('reservations:delete', (_e, id) => api.deleteReservation(id))
+  ipcMain.handle('reservations:stats', () => api.getReservationStats())
 
   ipcMain.handle('reservation-payments:list', (_e, filters) => api.listReservationPayments(filters))
   ipcMain.handle('reservation-payments:get', (_e, id) => api.getReservationPayment(id))

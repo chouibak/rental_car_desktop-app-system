@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import { useEffect, useRef } from 'react'
+import { IconCar, IconX } from './icons'
 import { useLang } from '../context/LangContext'
 import type { Dict } from '../i18n'
 
@@ -67,6 +69,52 @@ export function EmptyState({ message }: { message: string }) {
     <div className="empty-state">
       <div className="empty-state-icon">—</div>
       <p>{message}</p>
+    </div>
+  )
+}
+
+export function FormAlertBanner({
+  message,
+  onDismiss,
+}: {
+  message: string
+  onDismiss?: () => void
+}) {
+  const { t } = useLang()
+  const ref = useRef<HTMLDivElement>(null)
+  const isCarUnavailable = message === t.carNotAvailable
+
+  useEffect(() => {
+    if (!message) return
+    ref.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [message])
+
+  if (!message) return null
+
+  return (
+    <div
+      ref={ref}
+      className={`form-alert-banner ${isCarUnavailable ? 'form-alert-banner--car-unavailable' : 'form-alert-banner--error'}`}
+      role="alert"
+    >
+      <div className="form-alert-banner-icon" aria-hidden>
+        <IconCar size={22} />
+      </div>
+      <div className="form-alert-banner-body">
+        {isCarUnavailable ? (
+          <>
+            <strong>{t.carNotAvailable}</strong>
+            <p>{t.carNotAvailableHint}</p>
+          </>
+        ) : (
+          <p className="form-alert-banner-message">{message}</p>
+        )}
+      </div>
+      {onDismiss ? (
+        <button type="button" className="form-alert-banner-close" onClick={onDismiss} aria-label={t.cancel}>
+          <IconX size={16} />
+        </button>
+      ) : null}
     </div>
   )
 }

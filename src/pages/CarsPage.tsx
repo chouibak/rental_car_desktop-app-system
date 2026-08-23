@@ -1,23 +1,26 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { CarListStatusCell } from '../components/CarListStatusCell'
 import { ReservationMonthCalendar } from '../components/ReservationMonthCalendar'
 import { IconChevronRight, IconDownload, IconEdit, IconPlus, IconSearch, IconTrash } from '../components/icons'
-import { CarStatusBadge, EmptyState, PageHeader, StatCard } from '../components/ui'
+import { EmptyState, PageHeader, StatCard } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { monthBoundaryIsoRange, startOfMonth } from '../utils/calendar'
-import { formatContractDatetime } from '../utils/contracts'
-import { formatNumber } from '../utils/money'
-import { computeVidangeStatus, getVidangeTrafficLevel } from '../utils/vidange'
-import type { Car, CarComputedStatus, CarStats, Reservation } from '../types'
+import type { Car, CarComputedStatus, CarStats, Contract, Reservation } from '../types'
 
 const CATEGORIES = ['economique', 'compacte', 'suv', '4x4', 'monospace'] as const
 const STATUSES: CarComputedStatus[] = ['disponible', 'louee', 'hors_service']
+
+function isCurrentlyRented(car: Car) {
+  return (car.computed_status ?? car.status) === 'louee'
+}
 
 export default function CarsPage() {
   const { t, money } = useLang()
   const navigate = useNavigate()
   const [cars, setCars] = useState<Car[]>([])
   const [reservations, setReservations] = useState<Reservation[]>([])
+  const [contracts, setContracts] = useState<Contract[]>([])
   const [stats, setStats] = useState<CarStats | null>(null)
   const [q, setQ] = useState('')
   const [status, setStatus] = useState<CarComputedStatus | ''>('')
@@ -27,6 +30,11 @@ export default function CarsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
+
+  const calendarCars = useMemo(
+    () => (view === 'calendar' ? cars.filter(isCurrentlyRented) : cars),
+    [cars, view],
+  )
 
   const load = async () => {
     setLoading(true)
@@ -51,28 +59,26 @@ export default function CarsPage() {
       Promise<Car[]>,
       Promise<CarStats>,
       Promise<Reservation[]>,
+      Promise<Contract[]>,
     ] = [
       window.api.listCars(filters),
       window.api.getCarStats(),
       view === 'calendar'
         ? window.api.listReservations(monthBoundaryIsoRange(calendarMonth))
         : Promise.resolve([]),
+      view === 'calendar' ? window.api.listContracts() : Promise.resolve([]),
     ]
 
-    const [list, carStats, reservationList] = await Promise.all(requests)
+    const [list, carStats, reservationList, contractList] = await Promise.all(requests)
     setCars(list)
     setStats(carStats)
     setReservations(reservationList)
+    // Only contracts made without a reservation need their own calendar bar.
+    const standaloneContracts = contractList.filter((c) => !c.reservation_id)
+    setContracts(standaloneContracts)
 
     const urls: Record<number, string> = {}
-    const targetCars =
-      view === 'calendar'
-        ? list.filter((car) =>
-            reservationList.some(
-              (reservation) => reservation.car_id === car.id && reservation.status !== 'cancelled',
-            ),
-          )
-        : list
+    const targetCars = view === 'calendar' ? list.filter(isCurrentlyRented) : list
 
     await Promise.all(
       targetCars.map(async (car) => {
@@ -219,40 +225,7 @@ export default function CarsPage() {
                     </td>
                     <td>{t[car.category as keyof typeof t] ?? car.category}</td>
                     <td>
-                      <CarStatusBadge status={car.computed_status ?? 'disponible'} />
-                      {car.computed_status === 'louee' && car.return_date && (
-                        <div className="muted-text">
-                          {t.returnOn} {formatContractDatetime(car.return_date)}
-                        </div>
-                      )}
-                      {(() => {
-                        const vidange = computeVidangeStatus(car)
-                        if (!vidange.enabled) return null
-                        const level = getVidangeTrafficLevel(vidange)
-                        const label =
-                          level === 'never'
-                            ? t.vidangeNeverDone
-                            : level === 'due'
-                              ? t.vidangeStatusDue
-                              : level === 'soon'
-                                ? t.vidangeStatusSoon
-                                : t.vidangeStatusOk
-                        let remaining = ''
-                        if (!vidange.never_done && vidange.km_remaining != null) {
-                          const n = formatNumber(Math.abs(vidange.km_remaining))
-                          remaining =
-                            vidange.km_remaining <= 0
-                              ? t.vidangeKmOverdue.replace('{n}', n)
-                              : t.vidangeKmRemaining.replace('{n}', n)
-                        }
-                        return (
-                          <div className={`muted-text vidange-list-status vidange-list-status--${level}`}>
-                            <span className="vidange-list-dot" aria-hidden />
-                            {t.vidange}: {label}
-                            {remaining ? ` · ${remaining}` : ''}
-                          </div>
-                        )
-                      })()}
+                      <CarListStatusCell car={car} />
                     </td>
                     <td>
                       <strong>{money(car.price_per_day)}</strong>
@@ -283,8 +256,9 @@ export default function CarsPage() {
           <ReservationMonthCalendar
             month={calendarMonth}
             onMonthChange={setCalendarMonth}
-            cars={cars}
+            cars={calendarCars}
             reservations={reservations}
+            contracts={contracts}
             thumbUrls={thumbUrls}
           />
         </div>

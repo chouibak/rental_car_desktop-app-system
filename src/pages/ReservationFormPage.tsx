@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { CarSearchSelect } from '../components/CarSearchSelect'
 import { OptionSelect } from '../components/OptionSelect'
-import { PageHeader } from '../components/ui'
+import { PageHeader, FormAlertBanner } from '../components/ui'
 import { deliveryLocationOptions, normalizeDeliveryLocation } from '../utils/reservation'
 import { mapReservationSaveError } from '../utils/reservationErrors'
 import { useLang } from '../context/LangContext'
@@ -60,6 +60,8 @@ const emptyForm = () => ({
   daily_rate: 0,
   deposit_amount: 0,
   deposit_status: 'pending' as const,
+  franchise_applies: false,
+  franchise_amount: 0,
   status: 'confirmed' as ReservationStatus,
   payment_status: 'unpaid' as PaymentStatus,
   paid_amount: 0,
@@ -73,6 +75,7 @@ export default function ReservationFormPage() {
   const isEdit = Boolean(id)
   const reservationId = id ? Number(id) : undefined
   const presetCustomerId = searchParams.get('customer')
+  const presetCarId = searchParams.get('car')
 
   const [form, setForm] = useState(emptyForm())
   const [cars, setCars] = useState<Car[]>([])
@@ -88,10 +91,20 @@ export default function ReservationFormPage() {
       window.api.listCars(),
       window.api.listCustomers(),
       window.api.listChauffeurs({ activeOnly: true }),
-    ]).then(([carList, customerList, chauffeurList]) => {
+      ...(isEdit ? [] : [window.api.getSettings()]),
+    ]).then(([carList, customerList, chauffeurList, settings]) => {
       setCars(carList)
       setCustomers(customerList)
       setChauffeurs(chauffeurList)
+
+      if (!isEdit && settings) {
+        const defaultFranchise = Number(settings.default_franchise_amount || 0)
+        setForm((current) => ({
+          ...current,
+          franchise_amount: current.franchise_amount || defaultFranchise,
+          franchise_applies: current.franchise_applies || defaultFranchise > 0,
+        }))
+      }
 
       if (!isEdit && presetCustomerId) {
         const customerId = Number(presetCustomerId)
@@ -99,8 +112,16 @@ export default function ReservationFormPage() {
           setForm((current) => ({ ...current, customer_id: customerId }))
         }
       }
+
+      if (!isEdit && presetCarId) {
+        const carId = Number(presetCarId)
+        const car = carList.find((item) => item.id === carId)
+        if (car) {
+          setForm((current) => ({ ...current, car_id: carId, daily_rate: car.price_per_day }))
+        }
+      }
     })
-  }, [isEdit, presetCustomerId])
+  }, [isEdit, presetCustomerId, presetCarId])
 
   useEffect(() => {
     if (!isEdit || !reservationId) return
@@ -129,6 +150,8 @@ export default function ReservationFormPage() {
         daily_rate: data.daily_rate,
         deposit_amount: data.deposit_amount,
         deposit_status: data.deposit_status,
+        franchise_applies: Boolean(data.franchise_applies) || (data.franchise_amount ?? 0) > 0,
+        franchise_amount: data.franchise_amount ?? 0,
         status: data.status,
         payment_status: paymentStatus,
         paid_amount: paid,
@@ -205,6 +228,8 @@ export default function ReservationFormPage() {
       daily_rate: form.daily_rate,
       deposit_amount: form.deposit_amount,
       deposit_status: form.deposit_status,
+      franchise_applies: form.franchise_applies || form.franchise_amount > 0 ? 1 : 0,
+      franchise_amount: form.franchise_applies ? form.franchise_amount : 0,
       status: form.status,
     }
 
@@ -246,169 +271,225 @@ export default function ReservationFormPage() {
         </button>
       </PageHeader>
 
-      <form className="car-form panel panel-body" onSubmit={onSubmit}>
-        <div className="form-grid">
-          <div className="field">
-            <label>{t.customer}</label>
-            <select
-              className="select"
-              required
-              value={form.customer_id}
-              onChange={(e) => setForm((f) => ({ ...f, customer_id: Number(e.target.value) }))}
-            >
-              <option value="">{t.selectCustomer}</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>{t.chauffeur}</label>
-            <select
-              className="select"
-              value={form.chauffeur_id}
-              onChange={(e) =>
-                setForm((f) => ({
-                  ...f,
-                  chauffeur_id: e.target.value ? Number(e.target.value) : '',
-                }))
-              }
-            >
-              <option value="">{t.noChauffeur}</option>
-              {chauffeurs.map((chauffeur) => (
-                <option key={chauffeur.id} value={chauffeur.id}>
-                  {chauffeur.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>{t.car}</label>
-            <CarSearchSelect
-              cars={cars}
-              value={form.car_id}
-              selectedCarId={form.car_id}
-              onChange={(carId) => onCarChange(carId)}
-            />
-          </div>
-          <div className="field">
-            <label>{t.pickupDate}</label>
-            <input
-              className="input"
-              type="datetime-local"
-              required
-              value={form.pickup_date}
-              onChange={(e) => setForm((f) => ({ ...f, pickup_date: e.target.value }))}
-            />
-          </div>
-          <div className="field">
-            <label>{t.returnDateTime}</label>
-            <input
-              className="input"
-              type="datetime-local"
-              required
-              value={form.return_date}
-              onChange={(e) => setForm((f) => ({ ...f, return_date: e.target.value }))}
-            />
-          </div>
-          <div className="field">
-            <label>{t.dailyPrice}</label>
-            <input
-              className="input"
-              type="number"
-              min={0}
-              required
-              value={form.daily_rate}
-              onChange={(e) => setForm((f) => ({ ...f, daily_rate: Number(e.target.value) }))}
-            />
-          </div>
-          <div className="field">
-            <label>{t.deposit}</label>
-            <input
-              className="input"
-              type="number"
-              min={0}
-              value={form.deposit_amount}
-              onChange={(e) => setForm((f) => ({ ...f, deposit_amount: Number(e.target.value) }))}
-            />
-          </div>
-          <div className="field">
-            <label>{t.status}</label>
-            <select
-              className="select"
-              value={form.status}
-              onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as ReservationStatus }))}
-            >
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {t[s]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>{t.paymentStatus}</label>
-            <select
-              className="select"
-              value={form.payment_status}
-              onChange={(e) => onPaymentStatusChange(e.target.value as PaymentStatus)}
-            >
-              {PAYMENT_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {t[s]}
-                </option>
-              ))}
-            </select>
-          </div>
-          {form.payment_status === 'partial' && (
+      <FormAlertBanner message={error} onDismiss={() => setError('')} />
+
+      <form className="car-form reservation-form" onSubmit={onSubmit}>
+        <section className="form-section">
+          <h3 className="section-title">{t.vehicleAndDates}</h3>
+          <div className="form-grid form-grid-3">
             <div className="field">
-              <label>{t.amountPaid}</label>
+              <label>{t.customer}</label>
+              <select
+                className="select"
+                required
+                value={form.customer_id}
+                onChange={(e) => setForm((f) => ({ ...f, customer_id: Number(e.target.value) }))}
+              >
+                <option value="">{t.selectCustomer}</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>
+                {t.chauffeur} <span className="muted-text">({t.optional})</span>
+              </label>
+              <select
+                className="select"
+                value={form.chauffeur_id}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    chauffeur_id: e.target.value ? Number(e.target.value) : '',
+                  }))
+                }
+              >
+                <option value="">{t.noChauffeur}</option>
+                {chauffeurs.map((chauffeur) => (
+                  <option key={chauffeur.id} value={chauffeur.id}>
+                    {chauffeur.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>{t.car}</label>
+              <CarSearchSelect
+                cars={cars}
+                value={form.car_id}
+                selectedCarId={form.car_id}
+                onChange={(carId) => onCarChange(carId)}
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="form-section">
+          <h3 className="section-title">{t.rentalPeriod}</h3>
+          <div className="form-grid form-grid-3">
+            <div className="field">
+              <label>{t.pickupDate}</label>
+              <input
+                className="input"
+                type="datetime-local"
+                required
+                value={form.pickup_date}
+                onChange={(e) => setForm((f) => ({ ...f, pickup_date: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label>{t.returnDateTime}</label>
+              <input
+                className="input"
+                type="datetime-local"
+                required
+                value={form.return_date}
+                onChange={(e) => setForm((f) => ({ ...f, return_date: e.target.value }))}
+              />
+            </div>
+            <div className="field">
+              <label>{t.dailyPrice}</label>
               <input
                 className="input"
                 type="number"
-                min={0.01}
-                step="0.01"
-                max={Math.max(billedTotal - 0.01, 0.01)}
+                min={0}
                 required
-                value={form.paid_amount || ''}
-                onChange={(e) => setForm((f) => ({ ...f, paid_amount: Number(e.target.value) }))}
+                value={form.daily_rate}
+                onChange={(e) => setForm((f) => ({ ...f, daily_rate: Number(e.target.value) }))}
               />
-              <span className="muted-text">
-                {t.remaining}: {money(Math.max(0, billedTotal - (form.paid_amount || 0)))}
-              </span>
             </div>
-          )}
-          {form.payment_status === 'paid' && (
-            <div className="field">
-              <label>{t.amountPaid}</label>
-              <input className="input" value={money(billedTotal)} readOnly />
-            </div>
-          )}
-          <div className="field full">
-            <label>{t.deliveryLocation}</label>
-            <OptionSelect
-              value={form.delivery_location}
-              onChange={(delivery_location) => setForm((f) => ({ ...f, delivery_location }))}
-              placeholder={t.selectOption}
-              options={deliveryLocationOptions(t)}
-            />
           </div>
-          <div className="field full">
-            <label>{t.message}</label>
-            <textarea
-              className="textarea"
-              value={form.message}
-              onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))}
-            />
-          </div>
-          <div className="field full reservation-summary">
+          <div className="reservation-summary">
             <strong>{t.days}:</strong> {preview.days} · <strong>{t.total}:</strong> {money(preview.total)}
           </div>
-        </div>
+        </section>
 
-        {error && <div className="error">{error}</div>}
+        <section className="form-section">
+          <h3 className="section-title">{t.billingSection}</h3>
+          <div className="form-grid form-grid-3">
+            <div className="field">
+              <label>{t.deposit}</label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                value={form.deposit_amount}
+                onChange={(e) => setForm((f) => ({ ...f, deposit_amount: Number(e.target.value) }))}
+              />
+            </div>
+            <div className="field">
+              <label className="checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={form.franchise_applies}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      franchise_applies: e.target.checked,
+                      franchise_amount: e.target.checked ? f.franchise_amount : 0,
+                    }))
+                  }
+                />
+                {t.franchiseApplies}
+              </label>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                value={form.franchise_amount}
+                disabled={!form.franchise_applies}
+                onChange={(e) => {
+                  const franchise_amount = Number(e.target.value)
+                  setForm((f) => ({
+                    ...f,
+                    franchise_amount,
+                    franchise_applies: franchise_amount > 0 ? true : f.franchise_applies,
+                  }))
+                }}
+              />
+            </div>
+            <div className="field">
+              <label>{t.reservationStatus}</label>
+              <select
+                className="select"
+                value={form.status}
+                onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as ReservationStatus }))}
+              >
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {t[s]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>{t.paymentStatus}</label>
+              <select
+                className="select"
+                value={form.payment_status}
+                onChange={(e) => onPaymentStatusChange(e.target.value as PaymentStatus)}
+              >
+                {PAYMENT_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {t[s]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {form.payment_status === 'partial' ? (
+              <div className="field">
+                <label>{t.amountPaid}</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={0.01}
+                  step="0.01"
+                  max={Math.max(billedTotal - 0.01, 0.01)}
+                  required
+                  value={form.paid_amount || ''}
+                  onChange={(e) => setForm((f) => ({ ...f, paid_amount: Number(e.target.value) }))}
+                />
+                <span className="muted-text">
+                  {t.remaining}: {money(Math.max(0, billedTotal - (form.paid_amount || 0)))}
+                </span>
+              </div>
+            ) : form.payment_status === 'paid' ? (
+              <div className="field">
+                <label>{t.amountPaid}</label>
+                <input className="input" value={money(billedTotal)} readOnly />
+              </div>
+            ) : (
+              <div className="field form-grid-spacer" aria-hidden />
+            )}
+          </div>
+        </section>
+
+        <section className="form-section">
+          <h3 className="section-title">{t.details}</h3>
+          <div className="form-grid">
+            <div className="field full">
+              <label>{t.deliveryLocation}</label>
+              <OptionSelect
+                value={form.delivery_location}
+                onChange={(delivery_location) => setForm((f) => ({ ...f, delivery_location }))}
+                placeholder={t.selectOption}
+                options={deliveryLocationOptions(t)}
+              />
+            </div>
+            <div className="field full">
+              <label>{t.message}</label>
+              <textarea
+                className="textarea"
+                rows={3}
+                value={form.message}
+                onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))}
+              />
+            </div>
+          </div>
+        </section>
 
         <div className="form-actions form-actions--sticky">
           <button type="button" className="btn secondary" onClick={() => navigate('/reservations')}>

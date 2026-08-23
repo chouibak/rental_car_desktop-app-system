@@ -1,4 +1,5 @@
-import { memo, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { Dict } from '../i18n'
 import type { ContractDamage } from '../utils/contracts'
 import { DAMAGE_TYPES, createDamageAt, inferDamagePartFromPosition, normalizeDamage } from '../utils/contracts'
@@ -55,7 +56,9 @@ export function CarDamageDiagramInner({ damages, onChange, t, readOnly = false }
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
   const [pending, setPending] = useState<PendingClick | null>(null)
+  const [pickerStyle, setPickerStyle] = useState<CSSProperties>({})
   const damagesRef = useRef(damages)
+  const dragRafRef = useRef<number | null>(null)
   damagesRef.current = damages
 
   // Close popup on outside click
@@ -69,6 +72,32 @@ export function CarDamageDiagramInner({ damages, onChange, t, readOnly = false }
     return () => window.removeEventListener('mousedown', handler)
   }, [pending])
 
+  useLayoutEffect(() => {
+    if (!pending || !stageRef.current) return
+
+    const stageRect = stageRef.current.getBoundingClientRect()
+    const pickerW = 190
+    const pickerH = 170
+    const margin = 10
+    const anchorX = stageRect.left + pending.px
+    const anchorY = stageRect.top + pending.py
+
+    let transform = 'translate(-50%, calc(-100% - 10px))'
+    if (anchorY - pickerH < margin) {
+      transform = 'translate(-50%, 12px)'
+    }
+
+    const left = Math.max(margin + pickerW / 2, Math.min(window.innerWidth - margin - pickerW / 2, anchorX))
+
+    setPickerStyle({
+      position: 'fixed',
+      left,
+      top: anchorY,
+      transform,
+      zIndex: 1200,
+    })
+  }, [pending])
+
   // Drag pointermove / pointerup
   useEffect(() => {
     if (!draggingId || !onChange) return
@@ -76,11 +105,19 @@ export function CarDamageDiagramInner({ damages, onChange, t, readOnly = false }
     const onPointerMove = (event: PointerEvent) => {
       const stage = stageRef.current
       if (!stage) return
-      const { x, y } = pointerToPercent(event.clientX, event.clientY, stage)
-      setDragPos({ x, y })
+      const pos = pointerToPercent(event.clientX, event.clientY, stage)
+      if (dragRafRef.current != null) return
+      dragRafRef.current = window.requestAnimationFrame(() => {
+        dragRafRef.current = null
+        setDragPos(pos)
+      })
     }
 
     const onPointerUp = (event: PointerEvent) => {
+      if (dragRafRef.current != null) {
+        window.cancelAnimationFrame(dragRafRef.current)
+        dragRafRef.current = null
+      }
       const stage = stageRef.current
       if (stage) {
         const { x, y } = pointerToPercent(event.clientX, event.clientY, stage)
@@ -141,43 +178,6 @@ export function CarDamageDiagramInner({ damages, onChange, t, readOnly = false }
           />
         )}
 
-        {/* type picker popup */}
-        {pending && (
-          <div
-            className="damage-type-picker"
-            style={{
-              left: pending.px,
-              top: pending.py,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="damage-type-picker-label">{t.damageType}</p>
-            <div className="damage-type-picker-options">
-              {DAMAGE_TYPES.map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  className="damage-type-picker-btn"
-                  style={{ background: DAMAGE_COLORS[type] }}
-                  onClick={() => confirmType(type)}
-                >
-                  <span className="damage-type-picker-letter">{type}</span>
-                  <span className="damage-type-picker-name">
-                    {t[`damage_${type}` as keyof Dict] || type}
-                  </span>
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              className="damage-type-picker-cancel"
-              onClick={() => setPending(null)}
-            >
-              ✕
-            </button>
-          </div>
-        )}
-
         {/* existing markers */}
         {damages.map((rawDamage, index) => {
           const damage = normalizeDamage(rawDamage)
@@ -213,6 +213,42 @@ export function CarDamageDiagramInner({ damages, onChange, t, readOnly = false }
           )
         })}
       </div>
+
+      {pending
+        ? createPortal(
+            <div
+              className="damage-type-picker"
+              style={pickerStyle}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="damage-type-picker-label">{t.damageType}</p>
+              <div className="damage-type-picker-options">
+                {DAMAGE_TYPES.map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    className="damage-type-picker-btn"
+                    style={{ background: DAMAGE_COLORS[type] }}
+                    onClick={() => confirmType(type)}
+                  >
+                    <span className="damage-type-picker-letter">{type}</span>
+                    <span className="damage-type-picker-name">
+                      {t[`damage_${type}` as keyof Dict] || type}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="damage-type-picker-cancel"
+                onClick={() => setPending(null)}
+              >
+                ✕
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   )
 }

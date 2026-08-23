@@ -31,6 +31,13 @@ export type CustomerRecord = {
   updated_at: string
 }
 
+export type CustomerStats = {
+  total: number
+  with_active_reservation: number
+  with_active_contract: number
+  docs_expiring: number
+}
+
 export type CustomerInput = {
   name: string
   phone?: string
@@ -347,6 +354,32 @@ export function createCustomersApi(helpers: DbHelpers) {
       helpers.run('DELETE FROM customers WHERE id = ?', [id])
       deleteCustomerStorage(id)
       return { ok: true }
+    },
+
+    getCustomerStats(): CustomerStats {
+      const total = helpers.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM customers')
+      const withActiveReservation = helpers.queryOne<{ c: number }>(
+        `SELECT COUNT(DISTINCT customer_id) as c FROM reservations
+         WHERE status IN ('pending', 'confirmed')`,
+      )
+      const withActiveContract = helpers.queryOne<{ c: number }>(
+        `SELECT COUNT(DISTINCT client_id) as c FROM contracts
+         WHERE status = 'active' AND deleted_at IS NULL`,
+      )
+      const docsExpiring = helpers.queryOne<{ c: number }>(
+        `SELECT COUNT(*) as c FROM customers
+         WHERE (
+           (license_expiry_date != '' AND date(license_expiry_date) <= date('now', '+30 days'))
+           OR (cin_expiry_date != '' AND date(cin_expiry_date) <= date('now', '+30 days'))
+           OR (passport_expiry_date != '' AND date(passport_expiry_date) <= date('now', '+30 days'))
+         )`,
+      )
+      return {
+        total: total?.c ?? 0,
+        with_active_reservation: withActiveReservation?.c ?? 0,
+        with_active_contract: withActiveContract?.c ?? 0,
+        docs_expiring: docsExpiring?.c ?? 0,
+      }
     },
   }
 }

@@ -138,7 +138,7 @@ a {
 
 .content {
   margin-inline-start: 240px;
-  padding: 28px 32px 80px;
+  padding: 28px 32px 40px;
   max-width: calc(1400px + 240px);
   min-height: 100vh;
   transition: margin-inline-start 0.22s ease;
@@ -419,6 +419,20 @@ a {
 
 .btn.danger:hover:not(:disabled) {
   background: #b91c1c;
+}
+
+.btn.danger.outline {
+  background: transparent;
+  color: var(--danger);
+  border: 1.5px solid #fecaca;
+  box-shadow: none;
+}
+
+.btn.danger.outline:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: var(--danger);
+  color: var(--danger);
+  box-shadow: none;
 }
 
 .btn.ghost {
@@ -2257,15 +2271,12 @@ th {
 
 /* damage type picker popup */
 .damage-type-picker {
-  position: absolute;
-  z-index: 30;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 14px;
   box-shadow: 0 8px 32px rgba(15, 23, 42, 0.18);
   padding: 12px 12px 10px;
   min-width: 180px;
-  transform: translate(-50%, -110%);
 }
 
 .damage-type-picker-label {
@@ -2969,6 +2980,90 @@ th {
   font-size: 0.88rem;
 }
 
+.form-alert-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  margin-bottom: 16px;
+}
+
+.form-alert-banner--error {
+  background: linear-gradient(180deg, #fef2f2 0%, #fff5f5 100%);
+  border-color: #fecaca;
+}
+
+.form-alert-banner--car-unavailable {
+  background: linear-gradient(180deg, #fff7ed 0%, #fffbeb 100%);
+  border-color: #fdba74;
+  box-shadow: 0 10px 28px rgba(234, 88, 12, 0.12);
+}
+
+.form-alert-banner-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  color: #ea580c;
+}
+
+.form-alert-banner--error .form-alert-banner-icon {
+  color: #dc2626;
+}
+
+.form-alert-banner-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.form-alert-banner-body strong {
+  display: block;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #9a3412;
+  margin-bottom: 6px;
+}
+
+.form-alert-banner--error .form-alert-banner-body strong,
+.form-alert-banner--error .form-alert-banner-message {
+  color: #b91c1c;
+}
+
+.form-alert-banner-body p,
+.form-alert-banner-message {
+  margin: 0;
+  color: #7c2d12;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.form-alert-banner--error .form-alert-banner-body p,
+.form-alert-banner--error .form-alert-banner-message {
+  color: #991b1b;
+}
+
+.form-alert-banner-close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.form-alert-banner-close:hover {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--ink);
+}
+
 .muted-text {
   color: var(--muted);
   font-size: 0.82rem;
@@ -3098,6 +3193,25 @@ th {
   background: #fafbfc;
 }
 
+.doc-row--group {
+  background: #f3f4f6;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  padding-bottom: 10px;
+}
+
+.doc-row--nested {
+  margin-top: -1px;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  padding-left: 24px;
+}
+
+.doc-row--nested:last-of-type {
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
 .doc-info {
   display: grid;
   gap: 4px;
@@ -3153,44 +3267,31 @@ th {
 }
 
 .form-actions--sticky {
-  position: fixed;
+  position: sticky;
   bottom: 0;
-  left: 240px;
-  right: 0;
-  z-index: 50;
+  z-index: 10;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 32px;
+  margin-top: 16px;
+  padding: 12px 0;
   background: #ffffff;
   border-top: 1px solid var(--line);
   box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.08);
 }
 
-.app-shell.sidebar-collapsed .form-actions--sticky {
-  left: 0;
-}
-
-[dir='rtl'] .form-actions--sticky {
-  left: 0;
-  right: 240px;
-}
-
-[dir='rtl'] .app-shell.sidebar-collapsed .form-actions--sticky {
-  right: 0;
-}
-
-/* Inside modals, keep footer sticky within the modal panel */
+/* Inside modals, keep footer pinned to modal bottom */
 .modal .form-actions--sticky,
 .modal-backdrop .form-actions--sticky {
-  position: sticky;
-  bottom: 0;
-  left: auto;
-  right: auto;
-  border-top: 1px solid var(--line);
-  border-radius: 0 0 14px 14px;
-  box-shadow: 0 -2px 8px rgba(15, 23, 42, 0.08);
   padding: 12px 20px;
+  margin-top: 0;
+  border-radius: 0 0 14px 14px;
+}
+
+.field .input:focus,
+.field .textarea:focus,
+.field .select:focus {
+  scroll-margin-bottom: 72px;
 }
 
 .car-form-actions {
@@ -3499,6 +3600,16 @@ th {
   position: relative;
 }
 
+.car-search-select.is-disabled .car-search-trigger {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.car-search-trigger:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 .car-search-trigger {
   width: 100%;
   min-height: 42px;
@@ -3537,16 +3648,19 @@ th {
 }
 
 .car-search-menu {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
   overflow: hidden;
+}
+
+.car-search-menu:not(.car-search-menu--portal) {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
 }
 
 .car-search-field {
@@ -3673,6 +3787,21 @@ th {
   border-radius: 10px;
   background: #fafbfc;
   border: 1px solid var(--line);
+}
+
+.reservation-form {
+  display: grid;
+  gap: 14px;
+}
+
+.reservation-form .form-section .reservation-summary {
+  margin-top: 12px;
+}
+
+@media (max-width: 900px) {
+  .reservation-form .form-grid-3 {
+    grid-template-columns: 1fr;
+  }
 }
 
 .payment-summary {
@@ -3950,35 +4079,249 @@ th {
 
 .car-doc-list {
   display: grid;
+  gap: 20px;
+}
+
+.car-documents-panel .panel-body {
+  padding-top: 18px;
+}
+
+.car-documents-header {
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.car-doc-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.car-doc-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.car-doc-summary-pill--ok {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #bbf7d0;
+}
+
+.car-doc-summary-pill--warn {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+}
+
+.car-doc-group {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fafbfc 0%, #fff 100%);
+}
+
+.car-doc-group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.car-doc-group-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--accent-muted);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.car-doc-group-title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.car-doc-group-subtitle {
+  margin: 2px 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.car-doc-group-grid,
+.car-doc-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.car-doc-group-grid,
+.car-doc-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.car-doc-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.car-doc-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.car-doc-action-btn--renew {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.car-doc-action-btn--renew:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+
+.car-doc-history-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.car-doc-history-modal,
+.car-doc-renew-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.car-doc-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
   gap: 10px;
 }
 
-.car-doc-card {
+.car-doc-history-item {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  align-items: flex-start;
-  padding: 14px 16px;
+  padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 10px;
+  background: #fafbfc;
+}
+
+.car-doc-history-item-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.car-doc-history-expiry,
+.car-doc-history-file {
+  font-size: 0.82rem;
+}
+
+.car-doc-card {
+  position: relative;
+  display: flex;
+  min-height: 100%;
+  border: 1px solid var(--line);
+  border-radius: 14px;
   background: #fff;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .car-doc-card:hover {
   border-color: #cbd5e1;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+  transform: translateY(-1px);
+}
+
+.car-doc-card-accent {
+  width: 4px;
+  flex-shrink: 0;
+  background: #e2e8f0;
+}
+
+.car-doc-card--ok .car-doc-card-accent { background: #10b981; }
+.car-doc-card--low .car-doc-card-accent { background: #0ea5e9; }
+.car-doc-card--medium .car-doc-card-accent { background: #eab308; }
+.car-doc-card--high .car-doc-card-accent { background: #f97316; }
+.car-doc-card--critical .car-doc-card-accent { background: #ef4444; }
+.car-doc-card--none .car-doc-card-accent { background: #94a3b8; }
+
+.car-doc-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+
+.car-doc-card-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .car-doc-card-icon {
   flex-shrink: 0;
-  width: 36px;
-  height: 36px;
+  width: 42px;
+  height: 42px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
-  background: var(--accent-muted);
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
   color: var(--accent);
+}
+
+.car-doc-card--critical .car-doc-card-icon {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.car-doc-card--high .car-doc-card-icon {
+  background: #fff7ed;
+  color: #ea580c;
+  border-color: #fed7aa;
+}
+
+.car-doc-card--medium .car-doc-card-icon {
+  background: #fefce8;
+  color: #ca8a04;
+  border-color: #fef08a;
+}
+
+.car-doc-card--ok .car-doc-card-icon {
+  background: #ecfdf5;
+  color: #059669;
+  border-color: #bbf7d0;
 }
 
 .car-doc-card-content {
@@ -3989,10 +4332,31 @@ th {
 }
 
 .car-doc-card-head {
+  flex: 1;
+  min-width: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+}
+
+.car-doc-card-titles {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.car-doc-card-type {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.car-doc-card-year {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
 }
 
 .car-doc-card-head strong {
@@ -4004,25 +4368,63 @@ th {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+}
+
+.car-doc-card-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+}
+
+.car-doc-card-file-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
 }
 
 .car-doc-card-filename {
-  font-size: 0.82rem;
-  color: var(--muted);
-  max-width: 220px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .car-doc-card-empty {
-  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
   color: var(--muted);
+  font-size: 0.84rem;
 }
 
 .car-doc-card-date {
   font-size: 0.78rem;
   color: var(--muted);
+  font-weight: 600;
+}
+
+.car-doc-card-date-value {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--ink);
 }
 
 .car-doc-card-date time {
@@ -4035,12 +4437,13 @@ th {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  padding: 4px 10px;
+  padding: 5px 11px;
   border-radius: 999px;
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   font-weight: 700;
   text-align: center;
   white-space: nowrap;
+  letter-spacing: 0.01em;
 }
 
 .doc-expiry-badge--critical {
@@ -4263,6 +4666,104 @@ th {
   margin-top: 4px;
 }
 
+.car-list-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 11rem;
+}
+
+.car-list-status--rented {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1px solid #e2e8f0;
+}
+
+.car-list-status-return {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: var(--rented-soft, #eff6ff);
+  color: var(--rented, #2563eb);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.car-list-status-return strong {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.car-list-status-return svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  opacity: 0.9;
+}
+
+.car-list-status-vidange {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 5px;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: 7px;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.car-list-status-vidange-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: currentColor;
+}
+
+.car-list-status-vidange-label {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.car-list-status-vidange-state {
+  font-weight: 700;
+}
+
+.car-list-status-vidange-sep {
+  opacity: 0.55;
+  font-weight: 700;
+}
+
+.car-list-status-vidange-km {
+  font-weight: 600;
+}
+
+.car-list-status-vidange--ok {
+  color: #15803d;
+  background: #f0fdf4;
+}
+
+.car-list-status-vidange--soon {
+  color: #c2410c;
+  background: #fff7ed;
+}
+
+.car-list-status-vidange--due {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.car-list-status-vidange--never {
+  color: #475569;
+  background: #f8fafc;
+}
+
 .vidange-list-dot {
   width: 8px;
   height: 8px;
@@ -4351,6 +4852,15 @@ th {
   .car-doc-card-head {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .car-doc-group-grid,
+  .car-doc-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .car-documents-header {
+    flex-direction: column;
   }
 }
 

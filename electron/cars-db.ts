@@ -14,6 +14,49 @@ export type CarTransmission = 'manuelle' | 'automatique'
 export type CarFuel = 'Essence' | 'Diesel' | 'Hybride' | 'Électrique'
 export type CarComputedStatus = 'disponible' | 'louee' | 'hors_service'
 
+export type CarDocType =
+  | 'carte_grise_recto'
+  | 'carte_grise_verso'
+  | 'assurance'
+  | 'controle_technique'
+  | 'vignette'
+  | 'autorisation'
+
+export type CarDocumentHistoryItem = {
+  id: number
+  car_id: number
+  doc_type: CarDocType
+  file_path: string
+  expiry_date: string
+  archived_at: string
+}
+
+export type CarDocumentRenewInput = {
+  path: string
+  expiry?: string
+}
+
+export const CAR_DOC_SLOT_BY_TYPE: Record<
+  CarDocType,
+  { pathKey: keyof CarRecord; expiryKey?: keyof CarRecord }
+> = {
+  carte_grise_recto: { pathKey: 'doc_carte_grise_path' },
+  carte_grise_verso: { pathKey: 'doc_carte_grise_path_2' },
+  assurance: { pathKey: 'doc_assurance_path', expiryKey: 'doc_assurance_expiry' },
+  controle_technique: { pathKey: 'doc_controle_technique_path', expiryKey: 'doc_controle_technique_expiry' },
+  vignette: { pathKey: 'doc_vignette_path', expiryKey: 'doc_vignette_expiry' },
+  autorisation: { pathKey: 'doc_autorisation_path', expiryKey: 'doc_autorisation_expiry' },
+}
+
+const PATH_KEY_TO_DOC_TYPE: Partial<Record<string, CarDocType>> = {
+  doc_carte_grise_path: 'carte_grise_recto',
+  doc_carte_grise_path_2: 'carte_grise_verso',
+  doc_assurance_path: 'assurance',
+  doc_controle_technique_path: 'controle_technique',
+  doc_vignette_path: 'vignette',
+  doc_autorisation_path: 'autorisation',
+}
+
 export type CarImage = {
   id: number
   car_id: number
@@ -46,6 +89,7 @@ export type CarRecord = {
   vidange_last_date: string
   vidange_last_mileage: number
   doc_carte_grise_path: string
+  doc_carte_grise_path_2: string
   doc_carte_grise_expiry: string
   doc_assurance_path: string
   doc_assurance_expiry: string
@@ -69,6 +113,7 @@ export type CarDetail = CarRecord & {
   computed_status: CarComputedStatus
   return_date: string | null
   images: CarImage[]
+  document_history: CarDocumentHistoryItem[]
 }
 
 export type CarImageInput = {
@@ -100,6 +145,7 @@ export type CarInput = {
   vidange_last_date?: string
   vidange_last_mileage?: number
   doc_carte_grise_path?: string
+  doc_carte_grise_path_2?: string
   doc_carte_grise_expiry?: string
   doc_assurance_path?: string
   doc_assurance_expiry?: string
@@ -194,6 +240,7 @@ const THUMBNAIL_SQL = `
 
 const DOC_COLUMNS = [
   'doc_carte_grise_path',
+  'doc_carte_grise_path_2',
   'doc_carte_grise_expiry',
   'doc_assurance_path',
   'doc_assurance_expiry',
@@ -246,6 +293,7 @@ export function createCarsSchema(db: Database) {
       vidange_last_date TEXT DEFAULT '',
       vidange_last_mileage INTEGER DEFAULT 0,
       doc_carte_grise_path TEXT DEFAULT '',
+      doc_carte_grise_path_2 TEXT DEFAULT '',
       doc_carte_grise_expiry TEXT DEFAULT '',
       doc_assurance_path TEXT DEFAULT '',
       doc_assurance_expiry TEXT DEFAULT '',
@@ -264,6 +312,34 @@ export function createCarsSchema(db: Database) {
       car_id INTEGER NOT NULL,
       path TEXT NOT NULL,
       position INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY(car_id) REFERENCES cars(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS car_document_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      car_id INTEGER NOT NULL,
+      doc_type TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      expiry_date TEXT DEFAULT '',
+      archived_at TEXT NOT NULL,
+      FOREIGN KEY(car_id) REFERENCES cars(id) ON DELETE CASCADE
+    );
+  `)
+}
+
+export function migrateCarDocumentHistoryTable(db: Database, helpers: DbHelpers) {
+  const tables = helpers.queryAll<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'car_document_history'",
+  )
+  if (tables.length > 0) return
+  db.run(`
+    CREATE TABLE car_document_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      car_id INTEGER NOT NULL,
+      doc_type TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      expiry_date TEXT DEFAULT '',
+      archived_at TEXT NOT NULL,
       FOREIGN KEY(car_id) REFERENCES cars(id) ON DELETE CASCADE
     );
   `)
@@ -335,6 +411,12 @@ export function migrateCarsTable(db: Database, helpers: DbHelpers) {
   db.run('DROP TABLE cars_legacy')
 }
 
+export function migrateCarCarteGrisePath2Column(db: Database, helpers: DbHelpers) {
+  const cols = helpers.queryAll<{ name: string }>('PRAGMA table_info(cars)')
+  if (cols.some((c) => c.name === 'doc_carte_grise_path_2')) return
+  db.run("ALTER TABLE cars ADD COLUMN doc_carte_grise_path_2 TEXT DEFAULT ''")
+}
+
 export function migrateCarStatusColumn(db: Database, helpers: DbHelpers) {
   const cols = helpers.queryAll<{ name: string }>('PRAGMA table_info(cars)')
   if (cols.some((c) => c.name === 'status')) return
@@ -398,6 +480,7 @@ function normalizeCarInput(data: CarInput) {
     vidange_last_date: data.vidange_last_date ?? '',
     vidange_last_mileage: safeNumber(data.vidange_last_mileage, 0),
     doc_carte_grise_path: data.doc_carte_grise_path ?? '',
+    doc_carte_grise_path_2: data.doc_carte_grise_path_2 ?? '',
     doc_carte_grise_expiry: data.doc_carte_grise_expiry ?? '',
     doc_assurance_path: data.doc_assurance_path ?? '',
     doc_assurance_expiry: data.doc_assurance_expiry ?? '',
@@ -501,7 +584,33 @@ function mergeDocumentPaths(
   return merged
 }
 
+function archiveCarDocument(
+  helpers: DbHelpers,
+  carId: number,
+  docType: CarDocType,
+  filePath: string,
+  expiryDate: string,
+) {
+  if (!filePath?.trim()) return
+  helpers.run(
+    `INSERT INTO car_document_history (car_id, doc_type, file_path, expiry_date, archived_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [carId, docType, filePath, expiryDate || '', helpers.now()],
+  )
+}
+
+function listCarDocumentHistory(helpers: DbHelpers, carId: number): CarDocumentHistoryItem[] {
+  return helpers.queryAll<CarDocumentHistoryItem>(
+    `SELECT * FROM car_document_history
+     WHERE car_id = ?
+     ORDER BY datetime(archived_at) DESC, id DESC`,
+    [carId],
+  )
+}
+
 function deleteRemovedDocuments(
+  helpers: DbHelpers,
+  carId: number,
   previous: CarRecord | null,
   next: ReturnType<typeof normalizeCarInput>,
 ) {
@@ -510,7 +619,12 @@ function deleteRemovedDocuments(
     if (!col.endsWith('_path')) continue
     const oldPath = previous[col as keyof CarRecord] as string
     const newPath = next[col as keyof typeof next] as string
-    if (oldPath && oldPath !== newPath) deleteFileIfExists(oldPath)
+    if (!oldPath || oldPath === newPath) continue
+    const docType = PATH_KEY_TO_DOC_TYPE[col]
+    if (!docType) continue
+    const slot = CAR_DOC_SLOT_BY_TYPE[docType]
+    const oldExpiry = slot.expiryKey ? String(previous[slot.expiryKey] ?? '') : ''
+    archiveCarDocument(helpers, carId, docType, oldPath, oldExpiry)
   }
 }
 
@@ -657,7 +771,40 @@ export function createCarsApi(helpers: DbHelpers) {
           [id],
         )
         .filter((img) => fileExists(img.path))
-      return { ...car, images }
+      const document_history = listCarDocumentHistory(helpers, id)
+      return { ...car, images, document_history }
+    },
+
+    renewCarDocument(carId: number, docType: CarDocType, data: CarDocumentRenewInput) {
+      const existing = helpers.queryOne<CarRecord>('SELECT * FROM cars WHERE id = ?', [carId])
+      if (!existing) throw new Error('CAR_NOT_FOUND')
+      const slot = CAR_DOC_SLOT_BY_TYPE[docType]
+      if (!slot) throw new Error('INVALID_DOC_TYPE')
+
+      const currentPath = String(existing[slot.pathKey] ?? '')
+      const currentExpiry = slot.expiryKey ? String(existing[slot.expiryKey] ?? '') : ''
+      if (currentPath.trim()) {
+        archiveCarDocument(helpers, carId, docType, currentPath, currentExpiry)
+      }
+
+      const finalPath = data.path?.trim()
+        ? moveToCarStorage(data.path.trim(), carId, 'documents')
+        : ''
+
+      const t = helpers.now()
+      if (slot.expiryKey) {
+        helpers.run(
+          `UPDATE cars SET ${String(slot.pathKey)} = ?, ${String(slot.expiryKey)} = ?, updated_at = ? WHERE id = ?`,
+          [finalPath, data.expiry ?? '', t, carId],
+        )
+      } else {
+        helpers.run(
+          `UPDATE cars SET ${String(slot.pathKey)} = ?, updated_at = ? WHERE id = ?`,
+          [finalPath, t, carId],
+        )
+      }
+
+      return this.getCar(carId)
     },
 
     createCar(data: CarInput) {
@@ -717,11 +864,12 @@ export function createCarsApi(helpers: DbHelpers) {
       const withDocs = finalizeDocumentPaths(id, normalized)
       helpers.run(
         `UPDATE cars SET
-          doc_carte_grise_path = ?, doc_assurance_path = ?, doc_controle_technique_path = ?,
+          doc_carte_grise_path = ?, doc_carte_grise_path_2 = ?, doc_assurance_path = ?, doc_controle_technique_path = ?,
           doc_vignette_path = ?, doc_autorisation_path = ?, updated_at = ?
          WHERE id = ?`,
         [
           withDocs.doc_carte_grise_path,
+          withDocs.doc_carte_grise_path_2,
           withDocs.doc_assurance_path,
           withDocs.doc_controle_technique_path,
           withDocs.doc_vignette_path,
@@ -742,7 +890,7 @@ export function createCarsApi(helpers: DbHelpers) {
       const normalized = normalizeCarInput(data)
       assertUniquePlate(helpers, normalized.plate_number, id)
       const withExistingDocs = mergeDocumentPaths(existing, normalized)
-      deleteRemovedDocuments(existing, withExistingDocs)
+      deleteRemovedDocuments(helpers, id, existing, withExistingDocs)
 
       const withDocs = finalizeDocumentPaths(id, withExistingDocs)
       const t = helpers.now()
@@ -754,7 +902,7 @@ export function createCarsApi(helpers: DbHelpers) {
           bags = ?, badge = ?, status = ?, is_available = ?, mileage = ?, fuel_level = ?,
           condition_notes = ?,
           vidange_interval_km = ?, vidange_interval_months = ?,
-          doc_carte_grise_path = ?, doc_carte_grise_expiry = ?,
+          doc_carte_grise_path = ?, doc_carte_grise_path_2 = ?, doc_carte_grise_expiry = ?,
           doc_assurance_path = ?, doc_assurance_expiry = ?,
           doc_controle_technique_path = ?, doc_controle_technique_expiry = ?,
           doc_vignette_path = ?, doc_vignette_expiry = ?,
@@ -784,6 +932,7 @@ export function createCarsApi(helpers: DbHelpers) {
           withDocs.vidange_interval_km,
           withDocs.vidange_interval_months,
           withDocs.doc_carte_grise_path,
+          withDocs.doc_carte_grise_path_2,
           withDocs.doc_carte_grise_expiry,
           withDocs.doc_assurance_path,
           withDocs.doc_assurance_expiry,

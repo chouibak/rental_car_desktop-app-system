@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { IconEdit, IconPlus, IconSearch, IconTrash } from '../components/icons'
-import { EmptyState, PageHeader } from '../components/ui'
+import { EmptyState, PageHeader, StatCard } from '../components/ui'
 import { useLang } from '../context/LangContext'
-import type { Customer } from '../types'
+import type { Customer, CustomerStats } from '../types'
 import { formatDisplayDate } from '../utils/customer'
 
 export default function CustomersPage() {
   const { t } = useLang()
   const navigate = useNavigate()
   const [customers, setCustomers] = useState<Customer[]>([])
+  const [stats, setStats] = useState<CustomerStats | null>(null)
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -18,7 +19,12 @@ export default function CustomersPage() {
     setLoading(true)
     setError('')
     try {
-      setCustomers(await window.api.listCustomers(q || undefined))
+      const [rows, customerStats] = await Promise.all([
+        window.api.listCustomers(q || undefined),
+        window.api.getCustomerStats(),
+      ])
+      setCustomers(rows)
+      setStats(customerStats)
     } catch {
       setError(t.loadFailed)
     } finally {
@@ -61,6 +67,20 @@ export default function CustomersPage() {
           </button>
         </div>
       </PageHeader>
+
+      {stats && (
+        <div className="cards cards--4">
+          <StatCard label={t.totalClients} value={stats.total} />
+          <StatCard label={t.customersWithActiveReservation} value={stats.with_active_reservation} tone="info" />
+          <StatCard label={t.customersWithActiveContract} value={stats.with_active_contract} tone="success" />
+          <StatCard
+            label={t.customerDocsExpiring}
+            value={stats.docs_expiring}
+            hint={t.licenseExpiring}
+            tone={stats.docs_expiring > 0 ? 'warn' : 'success'}
+          />
+        </div>
+      )}
 
       <div className="panel">
         <div className="table-wrap">

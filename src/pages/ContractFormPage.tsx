@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ContractVehicleStateSection, DriverFields } from '../components/ContractFormSections'
-import { PageHeader } from '../components/ui'
+import { CarSearchSelect } from '../components/CarSearchSelect'
+import { PageHeader, FormAlertBanner } from '../components/ui'
 import { useLang } from '../context/LangContext'
 import { useToast } from '../context/ToastContext'
 import type { Dict } from '../i18n'
@@ -371,6 +372,8 @@ export default function ContractFormPage() {
       daily_rate: reservation.daily_rate,
       deposit_amount: reservation.deposit_amount,
       total_amount: reservation.total_amount,
+      franchise_applies: Boolean(reservation.franchise_applies) || (reservation.franchise_amount ?? 0) > 0,
+      franchise_amount: reservation.franchise_amount ?? 0,
       vehicle_brand: car?.brand || '',
       vehicle_model: car?.model || '',
       vehicle_plate: car?.plate_number || '',
@@ -434,6 +437,27 @@ export default function ContractFormPage() {
       ...customerToDriver1Fields(customer),
     }))
   }, [searchParams, customers, isEdit, form.client_id])
+
+  useEffect(() => {
+    if (isEdit) return
+    const carParam = searchParams.get('car')
+    if (!carParam || cars.length === 0) return
+    const carId = Number(carParam)
+    if (!carId || form.car_id === carId) return
+    const car = cars.find((row) => row.id === carId)
+    if (!car) return
+    setForm((current) => ({
+      ...current,
+      car_id: carId,
+      vehicle_brand: car.brand,
+      vehicle_model: car.model,
+      vehicle_plate: car.plate_number,
+      departure_mileage: car.mileage,
+      departure_fuel_level: car.fuel_level || 'plein',
+      departure_notes: car.condition_notes,
+      daily_rate: current.daily_rate || car.price_per_day,
+    }))
+  }, [searchParams, cars, isEdit, form.car_id])
 
   useEffect(() => {
     if (!isEdit || !id) return
@@ -595,6 +619,10 @@ export default function ContractFormPage() {
       setError(t.driverRequired)
       return
     }
+    if (!form.car_id) {
+      setError(t.selectCar)
+      return
+    }
     setSaving(true)
     try {
       if (isEdit && id) {
@@ -604,7 +632,7 @@ export default function ContractFormPage() {
       } else {
         const created = await window.api.createContract(buildPayload())
         showSuccess(t.saveSuccess)
-        navigate(`/contracts/${created.id}/edit`)
+        navigate(`/contracts/${created.id}`)
       }
     } catch (err) {
       setError(mapAppError(err, t))
@@ -688,6 +716,8 @@ export default function ContractFormPage() {
         )}
       </PageHeader>
 
+      <FormAlertBanner message={error} onDismiss={() => setError('')} />
+
       <form className="contract-form contract-form--admin" onSubmit={onSubmit}>
         <ContractSection step={1} title={t.contractIdentity} subtitle={t.contractIdentityHint}>
           <div className="form-grid form-grid-3 contract-identity-grid">
@@ -745,20 +775,13 @@ export default function ContractFormPage() {
 
             <div className="field">
               <label>{t.car} *</label>
-              <select
-                className="select"
-                required
-                disabled={reservationLinked}
+              <CarSearchSelect
+                cars={cars}
                 value={form.car_id}
-                onChange={(e) => onCarChange(Number(e.target.value))}
-              >
-                <option value="">{t.selectCar}</option>
-                {cars.map((row) => (
-                  <option key={row.id} value={row.id}>
-                    {row.name} — {row.plate_number}
-                  </option>
-                ))}
-              </select>
+                selectedCarId={form.car_id}
+                disabled={reservationLinked}
+                onChange={(carId) => onCarChange(carId)}
+              />
             </div>
 
             <div className="field">
@@ -1111,8 +1134,6 @@ export default function ContractFormPage() {
             <textarea className="textarea" rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
           </div>
         </ContractSection>
-
-        {error && <div className="error panel panel-body">{error}</div>}
 
         <div className="form-actions form-actions--sticky contract-form-actions">
           <button

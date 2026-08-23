@@ -25,6 +25,9 @@ const PAGE = { w: 595.28, h: 841.89, m: 22 }
 const CONTENT_W = PAGE.w - PAGE.m * 2
 const SECTION_GAP = 10
 const COL_GAP = 6
+const SECTION_BAR_PAD = 3
+const SECTION_BAR_FONT = 8
+const SECTION_BAR_H = SECTION_BAR_PAD + SECTION_BAR_FONT + SECTION_BAR_PAD
 const FOOTER_H = 40
 
 function footerIdValue(value?: string) {
@@ -232,9 +235,9 @@ function strokeBox(doc: InstanceType<typeof PDFDocument>, x: number, y: number, 
 
 function sectionBar(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, title: string) {
   doc.save()
-  doc.rect(x, y, w, 14).fill('#e0e0e0')
-  doc.rect(x, y, w, 14).lineWidth(0.5).stroke('#222')
-  doc.fillColor('#111').font('Helvetica-Bold').fontSize(8).text(title, x, y + 4, { width: w, align: 'center' })
+  doc.rect(x, y, w, SECTION_BAR_H).fill('#e0e0e0')
+  doc.rect(x, y, w, SECTION_BAR_H).lineWidth(0.5).stroke('#222')
+  doc.fillColor('#111').font('Helvetica-Bold').fontSize(SECTION_BAR_FONT).text(title, x, y + SECTION_BAR_PAD, { width: w, align: 'center' })
   doc.restore()
 }
 
@@ -257,28 +260,28 @@ function drawCarDiagram(
   const imgW = 1024
   const imgH = 1024
   const scale = Math.min(w / imgW, h / imgH)
-  const ox = x + (w - imgW * scale) / 2
-  const oy = y + (h - imgH * scale) / 2
-  const S = (n: number) => n * scale
+  const drawW = imgW * scale
+  const drawH = imgH * scale
+  const ox = x + (w - drawW) / 2
+  const oy = y + (h - drawH) / 2
 
   doc.save()
-  // Container border
   doc.roundedRect(x, y, w, h, 6).fillAndStroke('#ffffff', '#d7dde5')
-  
-  // Draw the car diagram image
+  doc.roundedRect(x, y, w, h, 6).clip()
+
   const publicDir = process.env.VITE_PUBLIC || path.join(__dirname, '../public')
   const imagePath = path.join(publicDir, 'car-diagram.png')
   if (fs.existsSync(imagePath)) {
     doc.image(imagePath, ox, oy, {
-      width: imgW * scale,
-      height: imgH * scale,
+      width: drawW,
+      height: drawH,
     })
   }
 
   damages.forEach((rawDamage) => {
     const damage = normalizeDamageItem(rawDamage)
-    const mx = ox + (imgW * scale * damage.x) / 100
-    const my = oy + (imgH * scale * damage.y) / 100
+    const mx = ox + (drawW * damage.x) / 100
+    const my = oy + (drawH * damage.y) / 100
     const color = DAMAGE_COLORS[damage.type] || '#dc2626'
 
     const r = 2.2
@@ -298,20 +301,24 @@ function drawCarDiagram(
 function drawFuelGauge(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, level: string) {
   const filled = FUEL_FILL[level] ?? 0
   const fraction = fuelLevelFraction(level)
-  const boxW = 18
-  const gap = 3
-  const boxStartX = x + 6
+  const boxW = 12
+  const gap = 2
+  const boxStartX = x + 76
+  const boxH = 6
+
+  doc.font('Helvetica-Bold').fontSize(5.5).fillColor('#374151')
+  doc.text('Niveau de carburant :', x, y + 2, { width: 72, lineBreak: false })
 
   for (let i = 0; i < 4; i++) {
     const bx = boxStartX + i * (boxW + gap)
-    doc.rect(bx, y, boxW, 10).lineWidth(0.5).stroke('#222')
+    doc.rect(bx, y, boxW, boxH).lineWidth(0.5).stroke('#777')
     if (i < filled) {
-      doc.rect(bx + 1, y + 1, boxW - 2, 8).fill('#222')
+      doc.rect(bx + 1, y + 1, boxW - 2, boxH - 2).fill('#374151')
     }
   }
 
-  doc.font('Helvetica-Bold').fontSize(6).fillColor('#1a4480')
-  doc.text(`Niveau de carburant : ${fraction}`, x + 6, y + 13, { width: w - 12, lineBreak: false })
+  doc.font('Helvetica-Bold').fontSize(5.5).fillColor('#374151')
+  doc.text(fraction, boxStartX + 4 * (boxW + gap) + 4, y + 2, { lineBreak: false })
 }
 
 function companyAddressLines(settings: Record<string, string>) {
@@ -331,125 +338,210 @@ function drawHeader(
   contract: ContractRecord & { client_name?: string },
   settings: Record<string, string>,
 ) {
-  const h = 68
   const rightW = 252
-  const logoW = 74
-  const logoGap = 12
+  const logoW = 62
+  const logoGap = 10
+  const lineS = 8
+  const padBottom = 2
   const company = settings.company_name || 'Rental Car Agency'
   const logoPath = settings.company_logo?.trim()
   let infoX = x
 
   if (logoPath && fs.existsSync(logoPath)) {
     try {
-      doc.image(logoPath, x, y + 4, { fit: [logoW, h - 8] })
+      doc.image(logoPath, x, y + 2, { fit: [logoW, 56] })
       infoX = x + logoW + logoGap
     } catch {
-      // no logo — agency block starts at left margin
+      // no logo
     }
   }
 
   const addressLines = companyAddressLines(settings)
-  let infoY = y + 6
+  let infoY = y + 4
 
-  doc.font('Helvetica-Bold').fontSize(11).fillColor('#1a4480').text(company, infoX, infoY, { width: 250 })
-  infoY += 13
+  doc.font('Helvetica-Bold').fontSize(10).fillColor('#1a4480').text(company, infoX, infoY, { width: 240 })
+  infoY += 11
 
-  doc.font('Helvetica').fontSize(7).fillColor('#111').text(settings.company_tagline || 'Location de voitures', infoX, infoY, { width: 250 })
-  infoY += 10
+  doc.font('Helvetica').fontSize(6.5).fillColor('#555').text(settings.company_tagline || 'Location de voitures', infoX, infoY, { width: 240 })
+  infoY += lineS
 
-  doc.font('Helvetica').fontSize(6.8).fillColor('#111')
+  doc.font('Helvetica').fontSize(6.5).fillColor('#111')
   for (const line of addressLines) {
-    doc.text(line, infoX, infoY, { width: 250 })
-    infoY += 9
+    doc.text(line, infoX, infoY, { width: 240 })
+    infoY += lineS
   }
 
-  if (settings.company_phone) {
-    const phoneText = settings.company_phone.trim().toUpperCase().startsWith('GSM')
+  const gsm = settings.company_phone?.trim()
+    ? (settings.company_phone.trim().toUpperCase().startsWith('GSM')
       ? settings.company_phone.trim()
-      : `GSM : ${settings.company_phone.trim()}`
-    doc.font('Helvetica-Bold').fontSize(6.8).fillColor('#111').text(phoneText, infoX, infoY, { width: 250 })
+      : `GSM : ${settings.company_phone.trim()}`)
+    : ''
+  const email = settings.company_email?.trim() ? `Email : ${settings.company_email.trim()}` : ''
+  const fax = settings.company_fax?.trim() ? `Fix / Fax : ${settings.company_fax.trim()}` : ''
+
+  doc.font('Helvetica-Bold').fontSize(6.5).fillColor('#111')
+  if (gsm && email) {
+    doc.text(`${gsm}   ·   ${email}`, infoX, infoY, { width: 240 })
+    infoY += lineS
+  } else if (gsm || email) {
+    doc.text(gsm || email, infoX, infoY, { width: 240 })
+    infoY += lineS
   }
+  if (fax) {
+    doc.text(fax, infoX, infoY, { width: 240 })
+    infoY += lineS
+  }
+
+  const leftBottom = infoY
 
   const rx = x + w - rightW
-  doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#111')
-  doc.text(`N° contrat : ${contract.contract_number}`, rx, y + 4, { width: rightW })
+  let ry = y + 4
+  doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#111').text(`N° contrat : ${contract.contract_number}`, rx, ry, { width: rightW })
+  ry += 10
+
   const contractDate = fmtDate(contract.contract_date || contract.start_date)
   const city = contract.contract_city || settings.company_city || ''
-  doc.font('Helvetica-Bold').fontSize(7)
-  doc.text(`Le ${contractDate}${city ? ` à ${city}` : ''}`, rx, y + 16, { width: rightW })
-  doc.text(`Le locataire (client) : ${val(contract.driver1_name || contract.client_name)}`, rx, y + 28, { width: rightW })
+  doc.font('Helvetica-Bold').fontSize(6.8).text(`Le ${contractDate}${city ? ` à ${city}` : ''}`, rx, ry, { width: rightW })
+  ry += 10
 
-  doc.font('Helvetica').fontSize(5).fillColor('#444').text(
-    'Ce contrat doit accompagner le véhicule pendant toute la durée de la location, afin d\'être présenté à toute réquisition des services de police ou de gendarmerie.',
-    rx,
-    y + 42,
-    { width: rightW, lineGap: 0.5 },
-  )
+  doc.text(`Le locataire (client) : ${val(contract.driver1_name || contract.client_name)}`, rx, ry, { width: rightW })
+  ry += 10
 
-  return h
+  const legalText = 'Ce contrat doit accompagner le véhicule pendant toute la durée de la location, afin d\'être présenté à toute réquisition des services de police ou de gendarmerie.'
+  doc.font('Helvetica').fontSize(5).fillColor('#666')
+  const legalH = doc.heightOfString(legalText, { width: rightW, lineGap: 0.3 })
+  doc.text(legalText, rx, ry, { width: rightW, lineGap: 0.3 })
+
+  const rightBottom = ry + legalH
+  const headerH = Math.max(leftBottom, rightBottom) - y + padBottom
+
+  doc.moveTo(x, y + headerH - 0.5).lineTo(x + w, y + headerH - 0.5).lineWidth(0.3).stroke('#ddd')
+  return headerH
 }
 
 function drawDrivers(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, contract: ContractRecord) {
-  const h = 126
   const w2 = (w - COL_GAP) / 2
   const rightX = x + w2 + COL_GAP
+  const pad = 5
+  const labelW = 92
+  const lineH = 11
+  const fontSize = 6.5
+
+  type DriverRow =
+    | { label: string; value: string; wrap?: boolean }
+    | { label: string; docNum: string; docExp: string; type: 'doc' }
+
+  const buildRows = (prefix: string): DriverRow[] => {
+    const birthDate = fmtDate(String(contract[`${prefix}birth_date` as keyof ContractRecord] ?? ''))
+    const birthPlace = val(contract[`${prefix}birth_place` as keyof ContractRecord])
+    const birthVal = (birthDate || birthPlace !== '—') ? `${birthDate}${birthPlace !== '—' ? ` — ${birthPlace}` : ''}` : '—'
+
+    return [
+      { label: 'Nom et Prénom', value: val(contract[`${prefix}name` as keyof ContractRecord]), wrap: true },
+      { label: 'Date / lieu naiss.', value: birthVal, wrap: true },
+      { label: 'Nationalité', value: val(contract[`${prefix}nationality` as keyof ContractRecord]) },
+      { label: 'Adresse', value: val(contract[`${prefix}address` as keyof ContractRecord]), wrap: true },
+      { label: 'Tél (GSM)', value: val(contract[`${prefix}phone` as keyof ContractRecord]) },
+      { type: 'doc', label: 'N° passeport', docNum: val(contract[`${prefix}passport_number` as keyof ContractRecord]), docExp: fmtDate(String(contract[`${prefix}passport_expires_at` as keyof ContractRecord] ?? '')) },
+      { type: 'doc', label: 'CIN', docNum: val(contract[`${prefix}cin_number` as keyof ContractRecord]), docExp: fmtDate(String(contract[`${prefix}cin_expires_at` as keyof ContractRecord] ?? '')) },
+      { type: 'doc', label: 'Permis', docNum: val(contract[`${prefix}license_number` as keyof ContractRecord]), docExp: fmtDate(String(contract[`${prefix}license_expires_at` as keyof ContractRecord] ?? '')) },
+    ]
+  }
+
+  doc.font('Helvetica').fontSize(fontSize)
+  const valW = w2 - labelW - pad * 2 - 4
+  const docNumW = 68
+  const docGap = 14
+
+  const rowHeight = (row: DriverRow) => {
+    if ('type' in row && row.type === 'doc') return lineH
+    if (!('value' in row) || !row.wrap) return lineH
+    return Math.max(lineH, doc.heightOfString(row.value || '—', { width: valW }))
+  }
+
+  const rows1 = buildRows('driver1_')
+  const rows2 = buildRows('driver2_')
+  const contentH = (rows: DriverRow[]) => rows.reduce((sum, row) => sum + rowHeight(row), 0)
+  const innerTop = SECTION_BAR_H + SECTION_BAR_PAD
+  const bottomPad = SECTION_BAR_PAD
+  const h = innerTop + Math.max(contentH(rows1), contentH(rows2)) + bottomPad
 
   strokeBox(doc, x, y, w2, h)
   strokeBox(doc, rightX, y, w2, h)
-
   sectionBar(doc, x, y, w2, '1er Conducteur')
   sectionBar(doc, rightX, y, w2, '2ème Conducteur')
 
-  const innerY = y + 18
-  const lineH = 13
-  const labelW = 106
+  const drawHalf = (startX: number, rows: DriverRow[]) => {
+    const labelX = startX + pad
+    const valX = startX + labelW + pad
+    let cy = y + innerTop
 
-  const drawHalf = (startX: number, prefix: string) => {
-    const colW = w2
-    const labelX = startX + 4
-    const valX = startX + labelW + 4
-    const valW = colW - labelW - 8
-    const docValW = 52
-    const expLblX = startX + labelW + docValW + 6
-    const expValX = startX + labelW + docValW + 34
-    const expValW = colW - (expValX - startX) - 4
-    const rowY = (row: number) => innerY + row * lineH
+    rows.forEach((row, index) => {
+      const rh = rowHeight(row)
 
-    const textL = (lbl: string, valStr: string, row: number) => {
-      doc.font('Helvetica-Bold').fontSize(7).fillColor('#111').text(lbl, labelX, rowY(row), { width: labelW, lineBreak: false })
-      doc.font('Helvetica').fontSize(7).text(valStr || '', valX, rowY(row), { width: valW, lineBreak: false })
-    }
+      if (index > 0) {
+        doc.moveTo(startX + pad, cy - 1).lineTo(startX + w2 - pad, cy - 1).lineWidth(0.25).stroke('#e5e7eb')
+      }
 
-    const textDoc = (lbl: string, valStr: string, expStr: string, row: number) => {
-      doc.font('Helvetica-Bold').fontSize(7).fillColor('#111').text(lbl, labelX, rowY(row), { width: labelW, lineBreak: false })
-      doc.font('Helvetica').fontSize(7).text(valStr || '', valX, rowY(row), { width: docValW, lineBreak: false })
-      doc.font('Helvetica-Bold').fontSize(7).text('Expire :', expLblX, rowY(row), { width: 28, lineBreak: false })
-      doc.font('Helvetica').fontSize(7).text(expStr || '', expValX, rowY(row), { width: expValW, lineBreak: false })
-    }
+      doc.font('Helvetica-Bold').fontSize(fontSize).fillColor('#374151')
+      doc.text(`${row.label} :`, labelX, cy + 1, { width: labelW - 4, lineBreak: false })
 
-    textL('Nom et Prénom :', val(contract[`${prefix}name` as keyof ContractRecord]), 0)
-    const birthDate = fmtDate(String(contract[`${prefix}birth_date` as keyof ContractRecord] ?? ''))
-    const birthPlace = val(contract[`${prefix}birth_place` as keyof ContractRecord])
-    textL('Date et lieu de naissance :', (birthDate || birthPlace !== '—') ? `${birthDate} — ${birthPlace}` : '—', 1)
-    textL('Nationalité :', val(contract[`${prefix}nationality` as keyof ContractRecord]), 2)
-    textL('Adresse :', val(contract[`${prefix}address` as keyof ContractRecord]), 3)
+      if ('type' in row && row.type === 'doc') {
+        const expLblX = valX + docNumW + docGap
+        const expValX = expLblX + 34
+        const expValW = valX + valW - expValX
 
-    textDoc('N° passeport :', val(contract[`${prefix}passport_number` as keyof ContractRecord]), fmtDate(String(contract[`${prefix}passport_expires_at` as keyof ContractRecord] ?? '')), 4)
-    textDoc('CIN :', val(contract[`${prefix}cin_number` as keyof ContractRecord]), fmtDate(String(contract[`${prefix}cin_expires_at` as keyof ContractRecord] ?? '')), 5)
-    textDoc('Permis :', val(contract[`${prefix}license_number` as keyof ContractRecord]), fmtDate(String(contract[`${prefix}license_expires_at` as keyof ContractRecord] ?? '')), 6)
-    textL('Tel (GSM) :', val(contract[`${prefix}phone` as keyof ContractRecord]), 7)
+        doc.font('Helvetica').fontSize(fontSize).fillColor('#111')
+        doc.text(row.docNum || '—', valX, cy + 1, { width: docNumW, lineBreak: false })
+        doc.font('Helvetica-Bold').fontSize(fontSize).fillColor('#374151')
+        doc.text('Expire :', expLblX, cy + 1, { width: 32, lineBreak: false })
+        doc.font('Helvetica').fontSize(fontSize).fillColor('#111')
+        doc.text(row.docExp && row.docExp !== '—' ? row.docExp : '—', expValX, cy + 1, { width: expValW, lineBreak: false })
+      } else if ('value' in row) {
+        doc.font('Helvetica').fontSize(fontSize).fillColor('#111')
+        doc.text(row.value || '—', valX, cy + 1, row.wrap ? { width: valW } : { width: valW, lineBreak: false })
+      }
+
+      cy += rh
+    })
   }
 
-  drawHalf(x, 'driver1_')
-  drawHalf(rightX, 'driver2_')
+  drawHalf(x, rows1)
+  drawHalf(rightX, rows2)
   return h
 }
 
 function drawVehicleEquipment(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, contract: ContractRecord) {
-  const h = 105
-  const leftW = (w - COL_GAP) * 0.55
-  const rightW = w - COL_GAP - leftW
+  const leftW = (w - COL_GAP) / 2
+  const rightW = (w - COL_GAP) / 2
   const rightX = x + leftW + COL_GAP
+
+  const innerY = y + SECTION_BAR_H + SECTION_BAR_PAD
+  const lineH = 12
+  const rowGap = 3
+  const valX = x + 120
+  const valW = leftW - (valX - x) - 6
+
+  const vehicleName = `${contract.vehicle_brand || ''} ${contract.vehicle_model || ''}`.trim()
+  const departureText = withPlace(fmtDatetime(contract.departure_at || contract.start_date), contract.departure_place)
+  const returnText = withPlace(fmtDatetime(contract.return_at || contract.end_date), contract.return_place)
+
+  // Measure wrapped heights first so long addresses grow the box instead of overflowing into the right column.
+  doc.font('Helvetica').fontSize(7)
+  const departureH = Math.max(lineH, doc.heightOfString(departureText, { width: valW }))
+  const returnH = Math.max(lineH, doc.heightOfString(returnText, { width: valW }))
+
+  const contentH =
+    lineH * 1.5 + // Marque/IMMT row + gap before départ
+    departureH + rowGap +
+    lineH + // KM départ
+    returnH + rowGap +
+    lineH + // KM retour
+    lineH + // Nb jours facturés
+    lineH + // Prolongation
+    10 // bottom padding
+
+  const h = Math.max(105, 18 + contentH)
 
   strokeBox(doc, x, y, leftW, h)
   strokeBox(doc, rightX, y, rightW, h)
@@ -457,68 +549,65 @@ function drawVehicleEquipment(doc: InstanceType<typeof PDFDocument>, x: number, 
   sectionBar(doc, x, y, leftW, 'Description du véhicule')
   sectionBar(doc, rightX, y, rightW, 'Équipements et accessoires')
 
-  const innerY = y + 18
-  const lineH = 12
-  const valX = x + 120
-
-  const vehicleName = `${contract.vehicle_brand || ''} ${contract.vehicle_model || ''}`.trim()
-
   doc.font('Helvetica-Bold').fontSize(7).text('Marque :', x + 4, innerY)
-  doc.font('Helvetica').fontSize(7).text(vehicleName || '—', valX, innerY)
+  doc.font('Helvetica').fontSize(7).text(vehicleName || '—', valX, innerY, { width: valW, lineBreak: false })
   doc.font('Helvetica-Bold').fontSize(7).text('IMMT :', x + leftW - 90, innerY)
   doc.font('Helvetica-Bold').fontSize(8).text(val(contract.vehicle_plate), x + leftW - 60, innerY, { width: 50, align: 'right' })
 
-  const textL = (lbl: string, valStr: string, row: number) => {
-    doc.font('Helvetica-Bold').fontSize(7).text(lbl, x + 4, innerY + row * lineH)
-    doc.font('Helvetica').fontSize(7).text(valStr || '', valX, innerY + row * lineH)
+  let cy = innerY + lineH * 1.5
+
+  const textL = (lbl: string, valStr: string, rowH: number, wrap = false) => {
+    doc.font('Helvetica-Bold').fontSize(7).text(lbl, x + 4, cy)
+    doc.font('Helvetica').fontSize(7).text(valStr || '', valX, cy, wrap ? { width: valW } : { width: valW, lineBreak: false })
+    cy += rowH + rowGap
   }
 
-  textL('Date et heure de départ :', withPlace(fmtDatetime(contract.departure_at || contract.start_date), contract.departure_place), 1.5)
-  textL('KM de départ :', contract.departure_mileage != null ? String(contract.departure_mileage) : '—', 2.5)
-  textL('Date et heure de retour :', withPlace(fmtDatetime(contract.return_at || contract.end_date), contract.return_place), 3.5)
-  textL('KM de retour :', contract.return_mileage != null ? String(contract.return_mileage) : '—', 4.5)
+  textL('Date et heure de départ :', departureText, departureH, true)
+  textL('KM de départ :', contract.departure_mileage != null ? String(contract.departure_mileage) : '—', lineH)
+  textL('Date et heure de retour :', returnText, returnH, true)
+  textL('KM de retour :', contract.return_mileage != null ? String(contract.return_mileage) : '—', lineH)
 
-  doc.font('Helvetica-Bold').fontSize(7).text('Nb de jours facturés :', x + 4, innerY + 5.5 * lineH)
-  doc.font('Helvetica').fontSize(7).text(String(contract.billed_days ?? contract.total_days ?? '—'), valX, innerY + 5.5 * lineH)
+  doc.font('Helvetica-Bold').fontSize(7).text('Nb de jours facturés :', x + 4, cy)
+  doc.font('Helvetica').fontSize(7).text(String(contract.billed_days ?? contract.total_days ?? '—'), valX, cy)
+  cy += lineH
 
-  doc.font('Helvetica-Bold').fontSize(7).text('Prolongation jusqu\'à :', x + 4, innerY + 6.5 * lineH)
-  doc.font('Helvetica').fontSize(7).text(contract.extension_until ? fmtDate(contract.extension_until) : '—', valX, innerY + 6.5 * lineH)
-  doc.font('Helvetica-Bold').fontSize(7).text('Nb jours prolong. :', x + leftW - 100, innerY + 6.5 * lineH)
-  doc.font('Helvetica').fontSize(7).text(String(contract.extension_days ?? 0), x + leftW - 20, innerY + 6.5 * lineH)
+  doc.font('Helvetica-Bold').fontSize(7).text('Prolongation jusqu\'à :', x + 4, cy)
+  doc.font('Helvetica').fontSize(7).text(contract.extension_until ? fmtDate(contract.extension_until) : '—', valX, cy)
+  doc.font('Helvetica-Bold').fontSize(7).text('Nb jours prolong. :', x + leftW - 100, cy)
+  doc.font('Helvetica').fontSize(7).text(String(contract.extension_days ?? 0), x + leftW - 20, cy)
 
-  // Equipments — fixed column widths to prevent label/checkbox overlap
+  // Equipments — clean 2-column grid
   const equipment = parseJsonArray<string>(contract.equipment)
-  const equipX = rightX + 6
-  const equipRowH = 15
-  const equipRows: Array<Array<{ key: string; label: string; slotW: number; labelW: number }>> = [
-    [
-      { key: 'radio', label: 'Poste Radio', slotW: 58, labelW: 44 },
-      { key: 'spare_wheel', label: 'Roue de secours', slotW: 84, labelW: 70 },
-      { key: 'jack', label: 'Cric', slotW: 36, labelW: 22 },
-      { key: 'documents', label: 'Documents', slotW: 62, labelW: 48 },
-    ],
-    [
-      { key: 'vest', label: 'Gilet', slotW: 44, labelW: 30 },
-      { key: 'extinguisher', label: 'Extincteur', slotW: 58, labelW: 44 },
-      { key: 'warning_triangle', label: 'Plaque de panne', slotW: 84, labelW: 70 },
-      { key: 'baby_seat', label: 'Siège bébé', slotW: 58, labelW: 44 },
-    ],
+  const equipItems = [
+    { key: 'radio', label: 'Poste Radio' },
+    { key: 'spare_wheel', label: 'Roue de secours' },
+    { key: 'jack', label: 'Cric' },
+    { key: 'documents', label: 'Documents' },
+    { key: 'vest', label: 'Gilet' },
+    { key: 'extinguisher', label: 'Extincteur' },
+    { key: 'warning_triangle', label: 'Plaque de panne' },
+    { key: 'baby_seat', label: 'Siège bébé' },
   ]
 
-  equipRows.forEach((row, rowIndex) => {
-    let cx = equipX
-    const rowY = innerY + rowIndex * equipRowH
-    row.forEach((item) => {
-      drawCheckbox(doc, cx, rowY, equipment.includes(item.key), item.label, item.labelW)
-      cx += item.slotW
-    })
+  const equipPad = 6
+  const equipCols = 2
+  const equipColW = (rightW - equipPad * 2) / equipCols
+  const equipRowH = 13
+  const equipStartY = innerY + 2
+
+  equipItems.forEach((item, index) => {
+    const col = index % equipCols
+    const row = Math.floor(index / equipCols)
+    const cx = rightX + equipPad + col * equipColW
+    const rowY = equipStartY + row * equipRowH
+    drawCheckbox(doc, cx, rowY, equipment.includes(item.key), item.label, equipColW - 14)
   })
 
-  const autresY = innerY + 2 * equipRowH + 4
-  drawCheckbox(doc, equipX, autresY, !!contract.equipment_other, 'Autres', 30)
-  doc.moveTo(equipX + 50, autresY + 8).lineTo(rightX + rightW - 8, autresY + 8).stroke('#aaa')
+  const autresY = equipStartY + Math.ceil(equipItems.length / equipCols) * equipRowH + 6
+  drawCheckbox(doc, rightX + equipPad, autresY, !!contract.equipment_other, 'Autres', 34)
+  doc.moveTo(rightX + equipPad + 46, autresY + 8).lineTo(rightX + rightW - equipPad, autresY + 8).lineWidth(0.4).stroke('#bbb')
   if (contract.equipment_other) {
-    doc.font('Helvetica').fontSize(7).fillColor('#111').text(contract.equipment_other, equipX + 52, autresY, { width: rightW - 58, lineBreak: false })
+    doc.font('Helvetica').fontSize(6.5).fillColor('#111').text(contract.equipment_other, rightX + equipPad + 48, autresY + 1, { width: rightW - equipPad * 2 - 48 })
   }
 
   return h
@@ -579,12 +668,12 @@ function drawVehicleState(doc: InstanceType<typeof PDFDocument>, x: number, y: n
   sectionBar(doc, x, y, w2, 'État du véhicule à la livraison')
   sectionBar(doc, rightX, y, w2, 'État du véhicule à la reprise')
 
-  // Layout constants
-  const legW = 46  // left legend column width
-  const diagramX_offset = legW + 4
-  const diagramW = w2 - diagramX_offset - 4
-  const diagramY = y + 16
-  const diagramH = h - 44
+  // Layout constants — maximize diagram area inside the fixed box
+  const fuelH = 14
+  const innerTop = SECTION_BAR_H + SECTION_BAR_PAD
+  const diagramW = w2 - 6
+  const diagramY = y + innerTop
+  const diagramH = h - innerTop - fuelH
 
   ;[
     { damages: departureDamages, fuel: contract.departure_fuel_level || '', bx: x },
@@ -592,19 +681,22 @@ function drawVehicleState(doc: InstanceType<typeof PDFDocument>, x: number, y: n
   ].forEach((block) => {
     const bx = block.bx
 
-    // Legend on the LEFT side, vertically centered
-    const legStartY = diagramY + 10
+    drawCarDiagram(doc, bx + 3, diagramY, diagramW, diagramH, block.damages)
+
+    const legStartX = bx + 6
+    const legStartY = diagramY + Math.max(4, (diagramH - 44) / 2)
     const legItems = ['R - Rayure', 'B - Bosse', 'E - Éclat', 'C - Cassure']
-    doc.font('Helvetica-Bold').fontSize(5.5).fillColor('#111')
-    legItems.forEach((item, i) => {
-      doc.text(item, bx + 4, legStartY + i * 12, { width: legW - 4, lineBreak: false })
+    doc.font('Helvetica-Bold').fontSize(5).fillColor('#374151')
+    
+    // Vertical legend on the left
+    let curY = legStartY
+    legItems.forEach((item) => {
+      doc.text(item, legStartX, curY, { lineBreak: false })
+      curY += 12
     })
 
-    // Car diagram to the right of the legend
-    drawCarDiagram(doc, bx + diagramX_offset, diagramY, diagramW, diagramH, block.damages)
-
-    // Fuel gauge at the very bottom of the box
-    drawFuelGauge(doc, bx + 4, y + h - 20, w2 - 8, block.fuel)
+    // Fuel gauge at bottom center
+    drawFuelGauge(doc, bx + (w2 - 160) / 2, y + h - 10, w2, block.fuel)
   })
 
   return h
@@ -783,16 +875,23 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
 
   // Table rows
   const tableStartY = cy
+  doc.font('Helvetica').fontSize(6.5)
+  const rowInfo = lines.map((line) => {
+    const isLocation = line.label === 'Location'
+    const lineDays = Number(line.days ?? (isLocation ? qty : 0))
+    const designation = isLocation ? `Location ${vehicleLabel || 'véhicule'} (${lineDays} j)` : line.label
+    const rowHeight = Math.max(rowH, doc.heightOfString(designation, { width: c[0] - 6 }) + 4)
+    return { designation, lineDays, rowHeight }
+  })
+
   lines.forEach((line, index) => {
     const amountTtc = Number(line.amount ?? 0)
     const amountHt = vatRate > 0 ? amountTtc / (1 + vatRate / 100) : amountTtc
     const amountVat = amountTtc - amountHt
-    const isLocation = line.label === 'Location'
-    const lineDays = Number(line.days ?? (isLocation ? qty : 0))
-    const designation = isLocation ? `Location ${vehicleLabel || 'véhicule'} (${lineDays} j)` : line.label
+    const { designation, lineDays, rowHeight } = rowInfo[index]
     const puHt = lineDays > 0 ? money(amountHt / lineDays) : '—'
 
-    if (index % 2 === 0) doc.rect(x, cy, w, rowH).fill('#f8fafc')
+    if (index % 2 === 0) doc.rect(x, cy, w, rowHeight).fill('#f8fafc')
     doc.moveTo(x, cy).lineTo(x + w, cy).lineWidth(0.3).stroke('#ddd')
 
     const rowVals = [
@@ -808,14 +907,14 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
     cx2 = x
     doc.font('Helvetica').fontSize(6.5).fillColor('#111')
     rowVals.forEach((cell, i) => {
-      doc.text(cell, cx2 + (i === 0 ? 4 : 2), cy + 3, { width: c[i] - 6, align: i === 0 ? 'left' : 'center', lineBreak: false })
+      doc.text(cell, cx2 + (i === 0 ? 4 : 2), cy + 3, { width: c[i] - 6, align: i === 0 ? 'left' : 'center', lineBreak: i !== 0 })
       cx2 += c[i]
     })
-    cy += rowH
+    cy += rowHeight
   })
 
   // Table outer border + vertical column separators
-  const tableH = headH + rowH * lines.length
+  const tableH = headH + rowInfo.reduce((sum, r) => sum + r.rowHeight, 0)
   doc.rect(x, tableStartY - headH, w, tableH).lineWidth(0.5).stroke('#222')
   cx2 = x
   c.forEach((cw, i) => {

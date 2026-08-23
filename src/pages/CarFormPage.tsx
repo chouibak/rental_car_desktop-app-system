@@ -13,19 +13,20 @@ const FUELS: CarFuel[] = ['Essence', 'Diesel', 'Hybride', 'Électrique']
 const STATUSES: CarComputedStatus[] = ['disponible', 'louee', 'hors_service']
 
 type DocKey =
-  | 'doc_carte_grise'
   | 'doc_assurance'
   | 'doc_controle_technique'
   | 'doc_vignette'
   | 'doc_autorisation'
 
 const DOC_FIELDS: { key: DocKey; labelKey: keyof import('../i18n').Dict; hasExpiry: boolean }[] = [
-  { key: 'doc_carte_grise', labelKey: 'carteGrise', hasExpiry: false },
   { key: 'doc_assurance', labelKey: 'assurance', hasExpiry: true },
   { key: 'doc_controle_technique', labelKey: 'controleTechnique', hasExpiry: true },
   { key: 'doc_vignette', labelKey: 'vignette', hasExpiry: true },
   { key: 'doc_autorisation', labelKey: 'autorisation', hasExpiry: true },
 ]
+
+const CARTE_GRISE_PATHS = ['doc_carte_grise_path', 'doc_carte_grise_path_2'] as const
+const CARTE_GRISE_LABELS: (keyof import('../i18n').Dict)[] = ['carteGriseDoc1', 'carteGriseDoc2']
 
 const emptyForm = (): Partial<Car> & { images: CarImage[] } => ({
   name: '',
@@ -51,6 +52,7 @@ const emptyForm = (): Partial<Car> & { images: CarImage[] } => ({
   vidange_last_date: '',
   vidange_last_mileage: 0,
   doc_carte_grise_path: '',
+  doc_carte_grise_path_2: '',
   doc_carte_grise_expiry: '',
   doc_assurance_path: '',
   doc_assurance_expiry: '',
@@ -99,6 +101,7 @@ export default function CarFormPage() {
       setPhotoUrls(pUrls)
       setDocFileNames({
         doc_carte_grise_path: fileBasename(car.doc_carte_grise_path),
+        doc_carte_grise_path_2: fileBasename(car.doc_carte_grise_path_2),
         doc_assurance_path: fileBasename(car.doc_assurance_path),
         doc_controle_technique_path: fileBasename(car.doc_controle_technique_path),
         doc_vignette_path: fileBasename(car.doc_vignette_path),
@@ -154,6 +157,7 @@ export default function CarFormPage() {
       await refreshPhotoUrls(images)
       setDocFileNames({
         doc_carte_grise_path: fileBasename(updated.doc_carte_grise_path),
+        doc_carte_grise_path_2: fileBasename(updated.doc_carte_grise_path_2),
         doc_assurance_path: fileBasename(updated.doc_assurance_path),
         doc_controle_technique_path: fileBasename(updated.doc_controle_technique_path),
         doc_vignette_path: fileBasename(updated.doc_vignette_path),
@@ -213,10 +217,9 @@ export default function CarFormPage() {
     if (!persisted && !isEdit) await window.api.deleteCarFile(path)
   }
 
-  const onAddDocument = async (docKey: DocKey) => {
+  const onAddDocumentByPath = async (pathKey: typeof CARTE_GRISE_PATHS[number] | `${DocKey}_path`) => {
     const picked = await window.api.pickCarDocument(carId)
     if (!picked) return
-    const pathKey = `${docKey}_path` as keyof Car
     const oldPath = form[pathKey] as string
     if (!isEdit && oldPath && oldPath !== picked.path) await window.api.deleteCarFile(oldPath)
 
@@ -229,6 +232,10 @@ export default function CarFormPage() {
     await persistIfEdit(nextForm)
   }
 
+  const onAddDocument = async (docKey: DocKey) => {
+    await onAddDocumentByPath(`${docKey}_path` as `${DocKey}_path`)
+  }
+
   const onOpenDocument = async (filePath: string) => {
     try {
       await window.api.openCarFile(filePath)
@@ -237,14 +244,21 @@ export default function CarFormPage() {
     }
   }
 
-  const onRemoveDocument = async (docKey: DocKey) => {
-    const pathKey = `${docKey}_path` as keyof Car
+  const onRemoveDocumentByPath = async (pathKey: typeof CARTE_GRISE_PATHS[number] | `${DocKey}_path`, expiryKey?: `${DocKey}_expiry`) => {
     const oldPath = form[pathKey] as string
-    const nextForm = { ...form, [pathKey]: '', [`${docKey}_expiry`]: '' }
+    const nextForm = {
+      ...form,
+      [pathKey]: '',
+      ...(expiryKey ? { [expiryKey]: '' } : {}),
+    }
     setForm(nextForm)
     setDocFileNames((names) => ({ ...names, [pathKey]: '' }))
     const saved = !isEdit || (await persistIfEdit(nextForm))
-    if (saved && oldPath) await window.api.deleteCarFile(oldPath)
+    if (saved && oldPath && !isEdit) await window.api.deleteCarFile(oldPath)
+  }
+
+  const onRemoveDocument = async (docKey: DocKey) => {
+    await onRemoveDocumentByPath(`${docKey}_path` as `${DocKey}_path`, `${docKey}_expiry`)
   }
 
   const onSubmit = async (e: FormEvent) => {
@@ -523,6 +537,44 @@ export default function CarFormPage() {
         <section className="form-section">
           <h3 className="section-title">{t.documents}</h3>
           <div className="doc-list">
+            <div className="doc-row doc-row--group">
+              <div className="doc-info">
+                <strong>{t.carteGrise}</strong>
+              </div>
+              <div className="doc-expiry-field doc-expiry-field--none" />
+              <div />
+            </div>
+            {CARTE_GRISE_PATHS.map((pathKey, index) => {
+              const path = form[pathKey] as string
+              return (
+                <div className="doc-row doc-row--nested" key={pathKey}>
+                  <div className="doc-info">
+                    <strong>{t[CARTE_GRISE_LABELS[index]]}</strong>
+                    {path ? (
+                      <>
+                        <span className="muted-text doc-file-name">{docFileNames[pathKey] || fileBasename(path)}</span>
+                        <button type="button" className="link-btn" onClick={() => onOpenDocument(path)}>
+                          {t.viewDocument}
+                        </button>
+                      </>
+                    ) : (
+                      <span className="muted-text">{t.noData}</span>
+                    )}
+                  </div>
+                  <div className="doc-expiry-field doc-expiry-field--none" />
+                  <div className="row-actions">
+                    <button type="button" className="btn secondary" onClick={() => onAddDocumentByPath(pathKey)}>
+                      {path ? t.edit : t.addDocument}
+                    </button>
+                    {path ? (
+                      <button type="button" className="btn danger" onClick={() => onRemoveDocumentByPath(pathKey)}>
+                        {t.delete}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              )
+            })}
             {docMeta.map((doc) => {
               const path = form[doc.pathKey] as string
               const expiry = form[doc.expiryKey] as string

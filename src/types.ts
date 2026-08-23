@@ -5,6 +5,28 @@ export type CarTransmission = 'manuelle' | 'automatique'
 export type CarFuel = 'Essence' | 'Diesel' | 'Hybride' | 'Électrique'
 export type CarComputedStatus = 'disponible' | 'louee' | 'hors_service'
 
+export type CarDocType =
+  | 'carte_grise_recto'
+  | 'carte_grise_verso'
+  | 'assurance'
+  | 'controle_technique'
+  | 'vignette'
+  | 'autorisation'
+
+export type CarDocumentHistoryItem = {
+  id: number
+  car_id: number
+  doc_type: CarDocType
+  file_path: string
+  expiry_date: string
+  archived_at: string
+}
+
+export type CarDocumentRenewInput = {
+  path: string
+  expiry?: string
+}
+
 export type CarImage = {
   id?: number
   car_id?: number
@@ -38,6 +60,7 @@ export type Car = {
   vidange_last_date?: string
   vidange_last_mileage?: number
   doc_carte_grise_path: string
+  doc_carte_grise_path_2: string
   doc_carte_grise_expiry: string
   doc_assurance_path: string
   doc_assurance_expiry: string
@@ -53,6 +76,7 @@ export type Car = {
   thumbnail?: string | null
   return_date?: string | null
   images?: CarImage[]
+  document_history?: CarDocumentHistoryItem[]
 }
 
 export type CarInput = Omit<Car, 'id' | 'computed_status' | 'thumbnail' | 'return_date' | 'created_at' | 'updated_at'> & {
@@ -134,6 +158,13 @@ export type Customer = {
 
 export type CustomerInput = Omit<Customer, 'id' | 'created_at' | 'updated_at'>
 
+export type CustomerStats = {
+  total: number
+  with_active_reservation: number
+  with_active_contract: number
+  docs_expiring: number
+}
+
 export type Chauffeur = {
   id: number
   name: string
@@ -192,6 +223,8 @@ export type Reservation = {
   total_amount: number
   deposit_amount: number
   deposit_status: DepositStatus
+  franchise_applies?: number
+  franchise_amount?: number
   status: ReservationStatus
   payment_status: PaymentStatus
   created_at?: string
@@ -215,8 +248,18 @@ export type ReservationInput = {
   daily_rate?: number
   deposit_amount?: number
   deposit_status?: DepositStatus
+  franchise_applies?: number
+  franchise_amount?: number
   status?: ReservationStatus
   payment_status?: PaymentStatus
+}
+
+export type ReservationStats = {
+  active: number
+  total: number
+  unpaid_amount: number
+  unpaid_count: number
+  paid_amount: number
 }
 
 export type ContractStatus = 'draft' | 'active' | 'closed' | 'cancelled'
@@ -646,6 +689,7 @@ declare global {
       pickCarPhoto: (carId?: number) => Promise<PickedFile | null>
       pickCarPhotos: (carId?: number) => Promise<PickedFile[]>
       pickCarDocument: (carId?: number) => Promise<PickedFile | null>
+      renewCarDocument: (carId: number, docType: CarDocType, data: CarDocumentRenewInput) => Promise<Car>
       deleteCarFile: (filePath: string) => Promise<{ ok: boolean }>
       getCarFileUrl: (filePath: string) => Promise<string>
       openCarFile: (filePath: string) => Promise<{ ok: boolean }>
@@ -655,6 +699,7 @@ declare global {
       createCustomer: (data: Partial<CustomerInput>) => Promise<Customer>
       updateCustomer: (id: number, data: Partial<CustomerInput>) => Promise<Customer>
       deleteCustomer: (id: number) => Promise<{ ok: boolean }>
+      getCustomerStats: () => Promise<CustomerStats>
       pickCustomerDocument: (customerId?: number) => Promise<PickedFile | null>
       deleteCustomerFile: (filePath: string) => Promise<{ ok: boolean }>
       openCustomerFile: (filePath: string) => Promise<{ ok: boolean }>
@@ -682,6 +727,7 @@ declare global {
         data: { payment_status: PaymentStatus; paid_amount?: number },
       ) => Promise<Reservation | null>
       deleteReservation: (id: number) => Promise<{ ok: boolean }>
+      getReservationStats: () => Promise<ReservationStats>
       listReservationPayments: (filters?: {
         q?: string
         reservation_id?: number | ''

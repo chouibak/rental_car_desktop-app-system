@@ -1,4 +1,4 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from 'react'
+import { memo, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import type { Dict } from '../i18n'
 import type { ContractDamage } from '../utils/contracts'
 import {
@@ -78,7 +78,7 @@ type ContractDamageRepeaterProps = {
   compact?: boolean
 }
 
-export function ContractDamageRepeater({ damages, kind, onChange, t }: ContractDamageRepeaterProps) {
+export function ContractDamageRepeaterInner({ damages, kind, onChange, t }: ContractDamageRepeaterProps) {
   const update = (index: number, patch: Partial<ContractDamage>) => {
     onChange(
       damages.map((row, i) => {
@@ -215,7 +215,7 @@ type ContractVehicleStateSectionProps = {
   compact?: boolean
 }
 
-export function ContractVehicleStateSection({
+export function ContractVehicleStateSectionInner({
   kind,
   fuelLevel,
   notes,
@@ -393,3 +393,6 @@ export function DriverFields({ prefix, form, setForm, t, required = false, onCop
     </div>
   )
 }
+
+export const ContractDamageRepeater = memo(ContractDamageRepeaterInner)
+export const ContractVehicleStateSection = memo(ContractVehicleStateSectionInner)

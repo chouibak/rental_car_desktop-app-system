@@ -1,6 +1,6 @@
 import type { Database } from 'sql.js'
 import { syncCarAvailability } from './cars-db'
-import { reservationPaidExpr, syncReservationPaymentStatus } from './payment-sync'
+import { reservationPaidExpr, reservationTotalExpr, syncReservationPaymentStatus } from './payment-sync'
 export type ReservationStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed'
 export type PaymentStatus = 'unpaid' | 'partial' | 'paid'
 export type DepositStatus = 'pending' | 'received' | 'refunded'
@@ -20,6 +20,8 @@ export type ReservationRecord = {
   total_amount: number
   deposit_amount: number
   deposit_status: DepositStatus
+  franchise_applies: number
+  franchise_amount: number
   status: ReservationStatus
   payment_status: PaymentStatus
   created_at: string
@@ -45,6 +47,8 @@ export type ReservationInput = {
   daily_rate?: number
   deposit_amount?: number
   deposit_status?: DepositStatus
+  franchise_applies?: number
+  franchise_amount?: number
   status?: ReservationStatus
   payment_status?: PaymentStatus
 }
@@ -56,6 +60,14 @@ export type ReservationFilters = {
   customer_id?: number | ''
   date_from?: string
   date_to?: string
+}
+
+export type ReservationStats = {
+  active: number
+  total: number
+  unpaid_amount: number
+  unpaid_count: number
+  paid_amount: number
 }
 
 type DbHelpers = {
@@ -91,6 +103,8 @@ export function createReservationsSchema(db: Database) {
       total_amount REAL NOT NULL DEFAULT 0,
       deposit_amount REAL DEFAULT 0,
       deposit_status TEXT NOT NULL DEFAULT 'pending',
+      franchise_applies INTEGER DEFAULT 0,
+      franchise_amount REAL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'confirmed',
       payment_status TEXT NOT NULL DEFAULT 'unpaid',
       created_at TEXT,
@@ -99,6 +113,24 @@ export function createReservationsSchema(db: Database) {
       FOREIGN KEY(customer_id) REFERENCES customers(id)
     );
   `)
+}
+
+const RESERVATION_MIGRATION_COLUMNS: Array<[string, string]> = [
+  ['franchise_applies', 'INTEGER DEFAULT 0'],
+  ['franchise_amount', 'REAL DEFAULT 0'],
+]
+
+export function migrateReservationsTable(db: Database, helpers: DbHelpers) {
+  createReservationsSchema(db)
+  const columns = helpers.queryAll<{ name: string }>('PRAGMA table_info(reservations)')
+  const names = new Set(columns.map((c) => c.name))
+  if (names.size === 0) return
+
+  for (const [col, type] of RESERVATION_MIGRATION_COLUMNS) {
+    if (!names.has(col)) {
+      db.run(`ALTER TABLE reservations ADD COLUMN ${col} ${type}`)
+    }
+  }
 }
 
 function calcDays(pickup: string, returnDate: string) {
@@ -225,6 +257,22 @@ function nextReference(helpers: DbHelpers) {
   return `${prefix}${String(next).padStart(3, '0')}`
 }
 
+function syncLinkedContractFranchiseFromReservation(
+  helpers: DbHelpers,
+  reservationId: number,
+  franchise_applies: number,
+  franchise_amount: number,
+) {
+  helpers.run(
+    `UPDATE contracts SET
+      franchise_applies = ?,
+      franchise_amount = ?,
+      updated_at = ?
+     WHERE reservation_id = ? AND deleted_at IS NULL AND status != 'cancelled'`,
+    [franchise_applies, franchise_amount, helpers.now(), reservationId],
+  )
+}
+
 function normalizeInput(data: ReservationInput, carsApi: CarsApi) {
   const car = carsApi.getCar(data.car_id)
   if (!car) throw new Error('CAR_NOT_FOUND')
@@ -232,6 +280,13 @@ function normalizeInput(data: ReservationInput, carsApi: CarsApi) {
   const days = calcDays(data.pickup_date, data.return_date)
   const daily_rate = data.daily_rate ?? car.price_per_day ?? 0
   const total_amount = days * daily_rate
+  const franchise_amount = Number(data.franchise_amount ?? 0)
+  const franchise_applies =
+    data.franchise_applies !== undefined
+      ? Number(data.franchise_applies) ? 1 : 0
+      : franchise_amount > 0
+        ? 1
+        : 0
 
   return {
     car_id: data.car_id,
@@ -246,6 +301,8 @@ function normalizeInput(data: ReservationInput, carsApi: CarsApi) {
     total_amount,
     deposit_amount: data.deposit_amount ?? 0,
     deposit_status: (data.deposit_status ?? 'pending') as DepositStatus,
+    franchise_applies,
+    franchise_amount,
     status: (data.status ?? 'confirmed') as ReservationStatus,
     payment_status: (data.payment_status ?? 'unpaid') as PaymentStatus,
   }
@@ -416,8 +473,9 @@ export function createReservationsApi(helpers: DbHelpers, carsApi: CarsApi) {
           reference, car_id, customer_id, chauffeur_id,
           pickup_date, return_date, delivery_location, message,
           days, daily_rate, total_amount, deposit_amount, deposit_status,
+          franchise_applies, franchise_amount,
           status, payment_status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           reference,
           normalized.car_id,
@@ -432,6 +490,8 @@ export function createReservationsApi(helpers: DbHelpers, carsApi: CarsApi) {
           normalized.total_amount,
           normalized.deposit_amount,
           normalized.deposit_status,
+          normalized.franchise_applies,
+          normalized.franchise_amount,
           normalized.status,
           normalized.payment_status,
           t,
@@ -493,6 +553,7 @@ export function createReservationsApi(helpers: DbHelpers, carsApi: CarsApi) {
           car_id = ?, customer_id = ?, chauffeur_id = ?,
           pickup_date = ?, return_date = ?, delivery_location = ?, message = ?,
           days = ?, daily_rate = ?, total_amount = ?, deposit_amount = ?, deposit_status = ?,
+          franchise_applies = ?, franchise_amount = ?,
           status = ?, updated_at = ?
          WHERE id = ?`,
         [
@@ -508,10 +569,19 @@ export function createReservationsApi(helpers: DbHelpers, carsApi: CarsApi) {
           normalized.total_amount,
           normalized.deposit_amount,
           normalized.deposit_status,
+          normalized.franchise_applies,
+          normalized.franchise_amount,
           normalized.status,
           t,
           id,
         ],
+      )
+
+      syncLinkedContractFranchiseFromReservation(
+        helpers,
+        id,
+        normalized.franchise_applies,
+        normalized.franchise_amount,
       )
 
       if (linkedContract && datesChanged) {
@@ -551,6 +621,35 @@ export function createReservationsApi(helpers: DbHelpers, carsApi: CarsApi) {
       helpers.run('DELETE FROM reservations WHERE id = ?', [id])
       syncCarStatus(helpers, existing.car_id)
       return { ok: true }
+    },
+
+    getReservationStats(): ReservationStats {
+      const active = helpers.queryOne<{ c: number }>(
+        `SELECT COUNT(*) as c FROM reservations WHERE status IN ('pending', 'confirmed')`,
+      )
+      const total = helpers.queryOne<{ c: number }>('SELECT COUNT(*) as c FROM reservations')
+      const unpaid = helpers.queryOne<{ amount: number; count: number }>(
+        `SELECT
+           COALESCE(SUM(CASE WHEN remaining > 0 THEN remaining ELSE 0 END), 0) as amount,
+           COALESCE(SUM(CASE WHEN remaining > 0 THEN 1 ELSE 0 END), 0) as count
+         FROM (
+           SELECT MAX(0, ${reservationTotalExpr('r')} - ${reservationPaidExpr('r')}) as remaining
+           FROM reservations r
+           WHERE r.status != 'cancelled'
+         )`,
+      )
+      const paid = helpers.queryOne<{ amount: number }>(
+        `SELECT COALESCE(SUM(${reservationPaidExpr('r')}), 0) as amount
+         FROM reservations r
+         WHERE r.status != 'cancelled'`,
+      )
+      return {
+        active: active?.c ?? 0,
+        total: total?.c ?? 0,
+        unpaid_amount: Number(unpaid?.amount ?? 0),
+        unpaid_count: Number(unpaid?.count ?? 0),
+        paid_amount: Number(paid?.amount ?? 0),
+      }
     },
   }
 }
