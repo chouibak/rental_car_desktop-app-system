@@ -13,6 +13,7 @@ export function mapAppError(err: unknown, t: Dict): string {
   if (msg.includes('TITLE_REQUIRED')) return t.titleRequired
   if (msg.includes('DRIVER1_REQUIRED')) return t.driverRequired
   if (msg.includes('INVALID_AMOUNT')) return t.invalidAmount
+  if (msg.includes('INVALID_SALARY')) return t.invalidAmount
   if (msg.includes('INVALID_VIDANGE_DATE')) return t.invalidVidangeDate
   if (msg.includes('INVALID_VIDANGE_MILEAGE')) return t.invalidVidangeMileage
   if (msg.includes('INVALID_VIDANGE_COST')) return t.invalidVidangeCost
@@ -33,6 +34,7 @@ export function mapAppError(err: unknown, t: Dict): string {
   }
   if (msg.includes('CUSTOMER_HAS_CONTRACTS') || msg.includes('CUSTOMER_HAS_RESERVATIONS')) return t.cannotDeleteCustomer
   if (msg.includes('CHAUFFEUR_HAS_RESERVATIONS')) return t.cannotDeleteChauffeur
+  if (msg.includes('EMPLOYEE_NOT_FOUND')) return t.loadFailed
   if (msg.includes('CAR_HAS_CONTRACTS') || msg.includes('CAR_HAS_RESERVATIONS')) return t.cannotDeleteCar
   if (msg.includes('PAYMENT_NOT_FOUND')) return t.cannotDeletePayment
   if (msg.includes('CONTRACT_NOT_FOUND') || msg.includes('RESERVATION_NOT_FOUND') || msg.includes('EXPENSE_NOT_FOUND')) {

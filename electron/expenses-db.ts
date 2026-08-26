@@ -123,6 +123,9 @@ export function migrateExpensesTable(db: Database, helpers: DbHelpers) {
   if (!existing.has('car_id')) {
     helpers.run('ALTER TABLE expenses ADD COLUMN car_id INTEGER')
   }
+  if (!existing.has('employee_id')) {
+    helpers.run('ALTER TABLE expenses ADD COLUMN employee_id INTEGER')
+  }
 }
 
 function normalizeInput(data: ExpenseInput) {

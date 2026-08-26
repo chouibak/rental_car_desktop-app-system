@@ -193,6 +193,68 @@ export type Chauffeur = {
 
 export type ChauffeurInput = Omit<Chauffeur, 'id' | 'created_at' | 'updated_at'>
 
+export type EmployeeRole = 'manager' | 'agent' | 'mechanic' | 'other'
+
+export type Employee = {
+  id: number
+  name: string
+  phone: string
+  email: string
+  address: string
+  cin_number: string
+  birth_date: string
+  birth_place: string
+  nationality: string
+  role: EmployeeRole | string
+  salary: number
+  hire_date: string
+  is_active: number | boolean
+  notes: string
+  created_at?: string
+  updated_at?: string
+}
+
+export type EmployeeInput = Omit<Employee, 'id' | 'created_at' | 'updated_at'>
+
+export type EmployeeStats = {
+  total: number
+  active: number
+  monthly_payroll: number
+}
+
+export type EmployeeDocument = {
+  id: number
+  employee_id: number
+  name: string
+  doc_type: string
+  path: string
+  created_at: string
+}
+
+export type SalaryPayment = {
+  id: number
+  employee_id: number
+  amount: number
+  payment_date: string
+  period_year: number
+  period_month: number
+  payment_method: string
+  notes: string
+  expense_id: number | null
+  created_at: string
+}
+
+export type SalaryPaymentInput = {
+  employee_id: number
+  amount: number
+  payment_date?: string
+  period_year: number
+  period_month: number
+  payment_method?: string
+  notes?: string
+  create_expense?: boolean
+}
+
 export type Client = {
   id: number
   full_name: string
@@ -711,6 +773,25 @@ declare global {
       pickChauffeurDocument: (chauffeurId?: number) => Promise<PickedFile | null>
       deleteChauffeurFile: (filePath: string) => Promise<{ ok: boolean }>
       openChauffeurFile: (filePath: string) => Promise<{ ok: boolean }>
+      listEmployees: (filters?: {
+        q?: string
+        activeOnly?: boolean
+        role?: EmployeeRole | ''
+      }) => Promise<Employee[]>
+      getEmployee: (id: number) => Promise<Employee | null>
+      getEmployeeStats: () => Promise<EmployeeStats>
+      createEmployee: (data: Partial<EmployeeInput>) => Promise<Employee>
+      updateEmployee: (id: number, data: Partial<EmployeeInput>) => Promise<Employee>
+      deleteEmployee: (id: number) => Promise<{ ok: boolean }>
+      pickEmployeeDocument: (employeeId?: number) => Promise<{ path: string; name: string } | null>
+      deleteEmployeeFile: (filePath: string) => Promise<{ ok: boolean }>
+      openEmployeeFile: (filePath: string) => Promise<{ ok: boolean }>
+      listEmployeeDocuments: (employeeId: number) => Promise<EmployeeDocument[]>
+      addEmployeeDocument: (data: { employee_id: number; name: string; doc_type?: string; path: string }) => Promise<EmployeeDocument>
+      deleteEmployeeDocument: (id: number) => Promise<{ ok: boolean }>
+      listSalaryPayments: (employeeId: number) => Promise<SalaryPayment[]>
+      createSalaryPayment: (data: SalaryPaymentInput) => Promise<SalaryPayment>
+      deleteSalaryPayment: (id: number) => Promise<{ ok: boolean }>
       listReservations: (filters?: {
         q?: string
         status?: ReservationStatus | ''

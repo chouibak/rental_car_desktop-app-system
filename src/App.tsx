@@ -35,6 +35,9 @@ import PaymentsPage from './pages/PaymentsPage'
 import RevenuePage from './pages/RevenuePage'
 import ExpensesPage from './pages/ExpensesPage'
 import ExpenseFormPage from './pages/ExpenseFormPage'
+import EmployeesPage from './pages/EmployeesPage'
+import EmployeeFormPage from './pages/EmployeeFormPage'
+import EmployeeDetailPage from './pages/EmployeeDetailPage'
 import ChauffeursPage from './pages/ChauffeursPage'
 import ChauffeurFormPage from './pages/ChauffeurFormPage'
 import ChauffeurDetailPage from './pages/ChauffeurDetailPage'
@@ -48,6 +51,7 @@ const navIcons = {
   '/cars': IconCar,
   '/customers': IconUsers,
   '/chauffeurs': IconSteering,
+  '/employees': IconUsers,
   '/reservations': IconCalendar,
   '/contracts': IconFile,
   '/payments': IconWallet,
@@ -98,6 +102,7 @@ export default function App() {
     { to: '/cars', label: t.cars },
     { to: '/customers', label: t.customers },
     { to: '/chauffeurs', label: t.chauffeurs },
+    { to: '/employees', label: t.employees },
     { to: '/reservations', label: t.reservations },
     { to: '/contracts', label: t.contracts },
     { to: '/payments', label: t.payments },
@@ -203,6 +208,10 @@ export default function App() {
           <Route path="/chauffeurs/new" element={<ChauffeurFormPage />} />
           <Route path="/chauffeurs/:id/edit" element={<ChauffeurFormPage />} />
           <Route path="/chauffeurs/:id" element={<ChauffeurDetailPage />} />
+          <Route path="/employees" element={<EmployeesPage />} />
+          <Route path="/employees/new" element={<EmployeeFormPage />} />
+          <Route path="/employees/:id/edit" element={<EmployeeFormPage />} />
+          <Route path="/employees/:id" element={<EmployeeDetailPage />} />
           <Route path="/reservations" element={<ReservationsPage />} />
           <Route path="/reservations/new" element={<ReservationFormPage />} />
           <Route path="/reservations/:id/edit" element={<ReservationFormPage />} />

@@ -33,6 +33,11 @@ import {
   pickChauffeurDocument,
 } from './chauffeurs-files'
 import {
+  deleteEmployeeFile,
+  openEmployeeFile,
+  pickEmployeeDocument,
+} from './employees-files'
+import {
   getCompanyLogoUrl,
   getContractConditionsUrl,
   pickCompanyLogo,
@@ -324,6 +329,24 @@ function registerIpc() {
   )
   ipcMain.handle('chauffeurs:deleteFile', (_e, filePath: string) => deleteChauffeurFile(filePath))
   ipcMain.handle('chauffeurs:openFile', (_e, filePath: string) => openChauffeurFile(filePath))
+
+  ipcMain.handle('employees:list', (_e, filters) => api.listEmployees(filters))
+  ipcMain.handle('employees:get', (_e, id) => api.getEmployee(id))
+  ipcMain.handle('employees:stats', () => api.getEmployeeStats())
+  ipcMain.handle('employees:create', (_e, data) => api.createEmployee(data))
+  ipcMain.handle('employees:update', (_e, id, data) => api.updateEmployee(id, data))
+  ipcMain.handle('employees:delete', (_e, id) => api.deleteEmployee(id))
+  ipcMain.handle('employees:pickDocument', (_e, employeeId?: number) =>
+    pickEmployeeDocument(win, employeeId),
+  )
+  ipcMain.handle('employees:deleteFile', (_e, filePath: string) => deleteEmployeeFile(filePath))
+  ipcMain.handle('employees:openFile', (_e, filePath: string) => openEmployeeFile(filePath))
+  ipcMain.handle('employees:listDocuments', (_e, employeeId: number) => api.listEmployeeDocuments(employeeId))
+  ipcMain.handle('employees:addDocument', (_e, data) => api.addEmployeeDocument(data))
+  ipcMain.handle('employees:deleteDocument', (_e, id: number) => api.deleteEmployeeDocument(id))
+  ipcMain.handle('employees:listSalaryPayments', (_e, employeeId: number) => api.listSalaryPayments(employeeId))
+  ipcMain.handle('employees:createSalaryPayment', (_e, data) => api.createSalaryPayment(data))
+  ipcMain.handle('employees:deleteSalaryPayment', (_e, id: number) => api.deleteSalaryPayment(id))
 
   ipcMain.handle('revenue:stats', () => api.getRevenueStats())
   ipcMain.handle('revenue:exportPdf', (_e, year: number, month: number) => generateRevenuePdf(year, month))

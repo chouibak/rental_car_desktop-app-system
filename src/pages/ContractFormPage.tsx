@@ -482,9 +482,13 @@ export default function ContractFormPage() {
     if (isEdit) return
     window.api.getSettings().then((settings) => {
       const defaultFranchise = Number(settings.default_franchise_amount || 0)
+      const defaultCity = (settings.company_city || '')
+        .split(',')[0]
+        ?.replace(/\s+\d{4,5}(?:\s.*)?$/, '')
+        .trim()
       setForm((current) => ({
         ...current,
-        contract_city: current.contract_city || settings.company_address || '',
+        contract_city: current.contract_city || defaultCity || '',
         franchise_amount: current.franchise_amount || defaultFranchise,
         franchise_applies: current.franchise_applies || defaultFranchise > 0,
       }))

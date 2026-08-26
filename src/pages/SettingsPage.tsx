@@ -10,8 +10,10 @@ import type { Lang, LicenseStatus } from '../types'
 
 
 const DEFAULT_LEGAL_FR =
-
   'Chaque dommage touche la société pendant la période de location ; le locataire sera exposé à la responsabilité administrative et judiciaire jusqu\'à la décision finale, ainsi qu\'au paiement de tous les frais résultants.'
+
+const DEFAULT_LEGAL_AR =
+  'كل ضرر يلحق بالسيارة أو بالشركة خلال فترة الإيجار، يتحمل المستأجر المسؤولية الإدارية والقضائية إلى حين صدور القرار النهائي، كما يلتزم بأداء جميع المصاريف والتكاليف'
 
 
 
@@ -107,7 +109,7 @@ const EMPTY_FORM: SettingsForm = {
 
   legal_mention_fr: DEFAULT_LEGAL_FR,
 
-  legal_mention_ar: '',
+  legal_mention_ar: DEFAULT_LEGAL_AR,
 
   currency: 'MAD',
 
@@ -206,7 +208,7 @@ export default function SettingsPage() {
         company_cnss: s.company_cnss || '',
         default_franchise_amount: s.default_franchise_amount || '0',
         legal_mention_fr: s.legal_mention_fr || DEFAULT_LEGAL_FR,
-        legal_mention_ar: s.legal_mention_ar || '',
+        legal_mention_ar: s.legal_mention_ar || DEFAULT_LEGAL_AR,
         currency: s.currency || 'MAD',
         notification_return_days: s.notification_return_days || '1',
         notification_doc_days: s.notification_doc_days || '30',

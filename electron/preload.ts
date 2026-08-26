@@ -111,6 +111,22 @@ const api = {
   deleteChauffeurFile: (filePath: string) => ipcRenderer.invoke('chauffeurs:deleteFile', filePath),
   openChauffeurFile: (filePath: string) => ipcRenderer.invoke('chauffeurs:openFile', filePath),
 
+  listEmployees: (filters?: unknown) => ipcRenderer.invoke('employees:list', filters),
+  getEmployee: (id: number) => ipcRenderer.invoke('employees:get', id),
+  getEmployeeStats: () => ipcRenderer.invoke('employees:stats'),
+  createEmployee: (data: unknown) => ipcRenderer.invoke('employees:create', data),
+  updateEmployee: (id: number, data: unknown) => ipcRenderer.invoke('employees:update', id, data),
+  deleteEmployee: (id: number) => ipcRenderer.invoke('employees:delete', id),
+  pickEmployeeDocument: (employeeId?: number) => ipcRenderer.invoke('employees:pickDocument', employeeId),
+  deleteEmployeeFile: (filePath: string) => ipcRenderer.invoke('employees:deleteFile', filePath),
+  openEmployeeFile: (filePath: string) => ipcRenderer.invoke('employees:openFile', filePath),
+  listEmployeeDocuments: (employeeId: number) => ipcRenderer.invoke('employees:listDocuments', employeeId),
+  addEmployeeDocument: (data: unknown) => ipcRenderer.invoke('employees:addDocument', data),
+  deleteEmployeeDocument: (id: number) => ipcRenderer.invoke('employees:deleteDocument', id),
+  listSalaryPayments: (employeeId: number) => ipcRenderer.invoke('employees:listSalaryPayments', employeeId),
+  createSalaryPayment: (data: unknown) => ipcRenderer.invoke('employees:createSalaryPayment', data),
+  deleteSalaryPayment: (id: number) => ipcRenderer.invoke('employees:deleteSalaryPayment', id),
+
   getRevenueStats: () => ipcRenderer.invoke('revenue:stats'),
   exportRevenuePdf: (year: number, month: number) => ipcRenderer.invoke('revenue:exportPdf', year, month),
 

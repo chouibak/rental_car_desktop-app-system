@@ -87,6 +87,18 @@ import {
   type ChauffeurInput,
 } from './chauffeurs-db'
 import {
+  createEmployeesApi,
+  createEmployeesSchema,
+  createEmployeeDocumentsSchema,
+  migrateEmployeesTable,
+  migrateEmployeeDocumentsTable,
+  createSalaryPaymentsSchema,
+  type EmployeeFilters,
+  type EmployeeInput,
+  type EmployeeDocumentInput,
+  type SalaryPaymentInput,
+} from './employees-db'
+import {
   createRevenueApi,
 } from './revenue-db'
 import {
@@ -96,8 +108,9 @@ import { initCustomerStorage } from './customer-storage'
 import { initChauffeurStorage } from './chauffeur-storage'
 import { initContractStorage } from './contract-storage'
 import { initExpenseStorage } from './expense-storage'
+import { initEmployeeStorage } from './employee-storage'
 import { initSettingsStorage } from './settings-files'
-import { fileExists, initStorage } from './storage'
+import { fileExists, deleteFileIfExists, initStorage } from './storage'
 
 const require = createRequire(__filename)
 
@@ -141,6 +154,7 @@ let contractsApi: ReturnType<typeof createContractsApi>
 let expensesApi: ReturnType<typeof createExpensesApi>
 let vidangeApi: ReturnType<typeof createVidangeApi>
 let chauffeursApi: ReturnType<typeof createChauffeursApi>
+let employeesApi: ReturnType<typeof createEmployeesApi>
 let revenueApi: ReturnType<typeof createRevenueApi>
 let notificationsApi: ReturnType<typeof createNotificationsApi>
 
@@ -160,7 +174,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   company_city: 'Fès 30000, Maroc',
   company_hours: 'Ouvert 24h/24, 7j/7',
   company_about: 'Rental Car Agency est une agence de location de voitures basée à Fès, Maroc.',
-  company_fax: '',
+  company_fax: '0567432122',
   company_tagline: 'Location de voitures',
   company_logo: '',
   contract_conditions_image: '',
@@ -172,7 +186,8 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   default_franchise_amount: '0',
   legal_mention_fr:
     'Chaque dommage touche la société pendant la période de location ; le locataire sera exposé à la responsabilité administrative et judiciaire jusqu\'à la décision finale, ainsi qu\'au paiement de tous les frais résultants.',
-  legal_mention_ar: '',
+  legal_mention_ar:
+    'كل ضرر يلحق بالسيارة أو بالشركة خلال فترة الإيجار، يتحمل المستأجر المسؤولية الإدارية والقضائية إلى حين صدور القرار النهائي، كما يلتزم بأداء جميع المصاريف والتكاليف',
   currency: 'MAD',
   language: 'fr',
   notification_return_days: '1',
@@ -187,10 +202,22 @@ function ensureSetting(key: string, value: string) {
   )
 }
 
+function ensureSettingIfEmpty(key: string, value: string) {
+  const existing = queryOne<{ value: string }>('SELECT value FROM settings WHERE key = ?', [key])
+  if (!existing) {
+    ensureSetting(key, value)
+    return
+  }
+  if (!String(existing.value ?? '').trim()) {
+    run('UPDATE settings SET value = ? WHERE key = ?', [value, key])
+  }
+}
+
 function applyDefaultSettings() {
   for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
     ensureSetting(key, value)
   }
+  ensureSettingIfEmpty('legal_mention_ar', DEFAULT_SETTINGS.legal_mention_ar)
 }
 
 function now() {
@@ -315,6 +342,7 @@ export async function initDb(userDataPath: string) {
   initChauffeurStorage(userDataPath)
   initContractStorage(userDataPath)
   initExpenseStorage(userDataPath)
+  initEmployeeStorage(userDataPath)
   initSettingsStorage(userDataPath)
   dbPath = path.join(userDataPath, 'rentalcar.sqlite')
   if (fs.existsSync(dbPath)) {
@@ -342,6 +370,11 @@ export async function initDb(userDataPath: string) {
   createExpensesSchema(db)
   migrateExpensesTable(db, dbHelpers())
   createChauffeursSchema(db)
+  createEmployeesSchema(db)
+  migrateEmployeesTable(db, dbHelpers())
+  createEmployeeDocumentsSchema(db)
+  migrateEmployeeDocumentsTable(db, dbHelpers())
+  createSalaryPaymentsSchema(db)
 
   carsApi = createCarsApi(dbHelpers())
   customersApi = createCustomersApi(dbHelpers())
@@ -385,6 +418,7 @@ export async function initDb(userDataPath: string) {
     },
   )
   chauffeursApi = createChauffeursApi(dbHelpers())
+  employeesApi = createEmployeesApi(dbHelpers())
   revenueApi = createRevenueApi(dbHelpers())
   notificationsApi = createNotificationsApi(dbHelpers(), getSettingsMap)
 
@@ -419,6 +453,7 @@ export type { ReservationPaymentInput, ReservationPaymentFilters } from './reser
 export type { ContractInput, ContractFilters, CloseContractInput, DeliveryHandoverInput, ExtendContractInput, SetContractExtensionInput } from './contracts-db'
 export type { ExpenseInput, ExpenseFilters } from './expenses-db'
 export type { ChauffeurInput, ChauffeurFilters } from './chauffeurs-db'
+export type { EmployeeInput, EmployeeFilters, EmployeeStats, EmployeeDocumentInput, SalaryPaymentInput } from './employees-db'
 export type { RevenueStats, RevenueMonthPoint, RevenueMethodPoint } from './revenue-db'
 export type { Notification, NotificationCounts, NotificationKind, NotificationSeverity } from './notifications-db'
 
@@ -790,6 +825,70 @@ export function getDbApi() {
     createChauffeur: (data: ChauffeurInput) => chauffeursApi.createChauffeur(data),
     updateChauffeur: (id: number, data: ChauffeurInput) => chauffeursApi.updateChauffeur(id, data),
     deleteChauffeur: (id: number) => chauffeursApi.deleteChauffeur(id),
+
+    listEmployees: (filters?: EmployeeFilters) => employeesApi.listEmployees(filters),
+    getEmployee: (id: number) => employeesApi.getEmployee(id),
+    getEmployeeStats: () => employeesApi.getEmployeeStats(),
+    createEmployee: (data: EmployeeInput) => employeesApi.createEmployee(data),
+    updateEmployee: (id: number, data: EmployeeInput) => employeesApi.updateEmployee(id, data),
+    deleteEmployee(id: number) {
+      const salaryPayments = employeesApi.getSalaryPaymentsWithExpenseIds(id)
+      for (const sp of salaryPayments) {
+        if (sp.expense_id) {
+          try { expensesApi.deleteExpense(sp.expense_id) } catch { /* ignore */ }
+        }
+      }
+      const docs = employeesApi.listEmployeeDocuments(id)
+      for (const doc of docs) {
+        if (doc.path) {
+          try { deleteFileIfExists(doc.path) } catch { /* ignore */ }
+        }
+      }
+      return employeesApi.deleteEmployee(id)
+    },
+
+    listEmployeeDocuments: (employeeId: number) => employeesApi.listEmployeeDocuments(employeeId),
+    addEmployeeDocument: (data: EmployeeDocumentInput) => employeesApi.addEmployeeDocument(data),
+    deleteEmployeeDocument(id: number) {
+      const result = employeesApi.deleteEmployeeDocument(id)
+      if (result.path) {
+        try { deleteFileIfExists(result.path) } catch { /* ignore */ }
+      }
+      return { ok: true }
+    },
+
+    listSalaryPayments: (employeeId: number) => employeesApi.listSalaryPayments(employeeId),
+    createSalaryPayment(data: SalaryPaymentInput & { create_expense?: boolean }) {
+      const employee = employeesApi.getEmployee(data.employee_id)
+      if (!employee) throw new Error('EMPLOYEE_NOT_FOUND')
+
+      let expenseId: number | null = null
+      if (data.create_expense !== false) {
+        const MONTHS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin',
+          'Juillet','Août','Septembre','Octobre','Novembre','Décembre']
+        const monthName = MONTHS_FR[(data.period_month - 1) % 12] ?? `Mois ${data.period_month}`
+        const title = `Salaire — ${employee.name} — ${monthName} ${data.period_year}`
+        const expense = expensesApi.createExpense({
+          title,
+          category: 'salaries',
+          amount: data.amount,
+          expense_date: data.payment_date ?? now().slice(0, 10),
+          payment_method: (data.payment_method as 'cash' | 'card' | 'bank_transfer') ?? 'cash',
+          notes: data.notes ?? '',
+          car_id: null,
+        })
+        expenseId = expense.id
+      }
+
+      return employeesApi.createSalaryPaymentRecord({ ...data, expense_id: expenseId })
+    },
+    deleteSalaryPayment(id: number) {
+      const result = employeesApi.deleteSalaryPaymentRecord(id)
+      if (result.expense_id) {
+        try { expensesApi.deleteExpense(result.expense_id) } catch { /* ignore */ }
+      }
+      return { ok: true }
+    },
 
     getRevenueStats: () => revenueApi.getRevenueStats(),
     getRevenuePeriodSummary: (year: number, month: number) => revenueApi.getRevenuePeriodSummary(year, month),

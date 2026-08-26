@@ -3,6 +3,7 @@ import path from 'node:path'
 import PDFDocument from 'pdfkit'
 import { PDFDocument as PdfLibDocument } from 'pdf-lib'
 import type { ContractRecord } from './contracts-db'
+import { prepareArabicForPdf, resolveArabicFontPath } from './arabic-text'
 
 type DamageItem = {
   id?: string
@@ -29,6 +30,26 @@ const SECTION_BAR_PAD = 3
 const SECTION_BAR_FONT = 8
 const SECTION_BAR_H = SECTION_BAR_PAD + SECTION_BAR_FONT + SECTION_BAR_PAD
 const FOOTER_H = 40
+const FOOTER_H_WITH_AR = 54
+const ARABIC_FONT_NAME = 'ContractArabic'
+
+function footerHeight(settings: Record<string, string>) {
+  return settings.legal_mention_ar?.trim() ? FOOTER_H_WITH_AR : FOOTER_H
+}
+
+function ensureArabicFont(doc: InstanceType<typeof PDFDocument>) {
+  const fontPath = resolveArabicFontPath()
+  if (!fontPath) return false
+  try {
+    const registered = (doc as unknown as { _fontFamilies?: Record<string, unknown> })._fontFamilies
+    if (!registered?.[ARABIC_FONT_NAME]) {
+      doc.registerFont(ARABIC_FONT_NAME, fontPath)
+    }
+    return true
+  } catch {
+    return false
+  }
+}
 
 function footerIdValue(value?: string) {
   const text = String(value ?? '').trim()
@@ -94,6 +115,17 @@ const DAMAGE_LABELS: Record<string, string> = {
   B: 'Bosse',
   E: 'Éclat',
   C: 'Cassure',
+}
+
+const DAMAGE_LEGEND_ORDER = ['R', 'B', 'E', 'C'] as const
+
+function countDamagesByType(damages: DamageItem[]) {
+  const counts: Record<string, number> = { R: 0, B: 0, E: 0, C: 0 }
+  for (const damage of damages) {
+    const type = String(damage.type || '').toUpperCase()
+    if (type in counts) counts[type] += 1
+  }
+  return counts
 }
 
 const DAMAGE_COLORS: Record<string, string> = {
@@ -330,6 +362,20 @@ function companyAddressLines(settings: Record<string, string>) {
   return [address || city]
 }
 
+function looksLikeStreetAddress(value: string) {
+  return /\b(rue|avenue|bd|boulevard|hay|street|route|lot)\b/i.test(value) || /^\d+\s/.test(value)
+}
+
+function contractPlaceLabel(city: string, settings: Record<string, string>) {
+  let raw = city.trim()
+  if (!raw || looksLikeStreetAddress(raw)) {
+    raw = settings.company_city?.trim() || ''
+  }
+  if (!raw) return ''
+  const firstPart = raw.split(',')[0]?.trim() || raw
+  return firstPart.replace(/\s+\d{4,5}(?:\s.*)?$/, '').trim() || firstPart
+}
+
 function drawHeader(
   doc: InstanceType<typeof PDFDocument>,
   x: number,
@@ -338,7 +384,6 @@ function drawHeader(
   contract: ContractRecord & { client_name?: string },
   settings: Record<string, string>,
 ) {
-  const rightW = 252
   const logoW = 62
   const logoGap = 10
   const lineS = 8
@@ -380,37 +425,45 @@ function drawHeader(
   const fax = settings.company_fax?.trim() ? `Fix / Fax : ${settings.company_fax.trim()}` : ''
 
   doc.font('Helvetica-Bold').fontSize(6.5).fillColor('#111')
-  if (gsm && email) {
-    doc.text(`${gsm}   ·   ${email}`, infoX, infoY, { width: 240 })
-    infoY += lineS
-  } else if (gsm || email) {
-    doc.text(gsm || email, infoX, infoY, { width: 240 })
+  if (gsm) {
+    doc.text(gsm, infoX, infoY, { width: 240 })
     infoY += lineS
   }
   if (fax) {
     doc.text(fax, infoX, infoY, { width: 240 })
     infoY += lineS
   }
+  if (email) {
+    doc.text(email, infoX, infoY, { width: 240 })
+    infoY += lineS
+  }
 
   const leftBottom = infoY
 
-  const rx = x + w - rightW
+  const w2 = (w - COL_GAP) / 2
+  const rightX = x + w2 + COL_GAP
   let ry = y + 4
-  doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#111').text(`N° contrat : ${contract.contract_number}`, rx, ry, { width: rightW })
-  ry += 10
 
   const contractDate = fmtDate(contract.contract_date || contract.start_date)
-  const city = contract.contract_city || settings.company_city || ''
-  doc.font('Helvetica-Bold').fontSize(6.8).text(`Le ${contractDate}${city ? ` à ${city}` : ''}`, rx, ry, { width: rightW })
+  const city = contractPlaceLabel(String(contract.contract_city ?? ''), settings)
+  const dateVal = `Le ${contractDate}${city ? ` à ${city}` : ''}`
+  const legalText =
+    'Ce contrat doit accompagner le véhicule pendant toute la durée de la location, afin d\'être présenté à toute réquisition des services de police ou de gendarmerie.'
+
+  doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#111')
+  doc.text(`N° contrat : ${val(contract.contract_number)}`, rightX, ry, { width: w2 })
   ry += 10
 
-  doc.text(`Le locataire (client) : ${val(contract.driver1_name || contract.client_name)}`, rx, ry, { width: rightW })
+  doc.font('Helvetica-Bold').fontSize(6.8)
+  doc.text(`Date : ${dateVal}`, rightX, ry, { width: w2 })
   ry += 10
 
-  const legalText = 'Ce contrat doit accompagner le véhicule pendant toute la durée de la location, afin d\'être présenté à toute réquisition des services de police ou de gendarmerie.'
+  doc.text(`Locataire (client) : ${val(contract.driver1_name || contract.client_name)}`, rightX, ry, { width: w2 })
+  ry += 11
+
   doc.font('Helvetica').fontSize(5).fillColor('#666')
-  const legalH = doc.heightOfString(legalText, { width: rightW, lineGap: 0.3 })
-  doc.text(legalText, rx, ry, { width: rightW, lineGap: 0.3 })
+  const legalH = doc.heightOfString(legalText, { width: w2, lineGap: 0.3 })
+  doc.text(legalText, rightX, ry, { width: w2, lineGap: 0.3 })
 
   const rightBottom = ry + legalH
   const headerH = Math.max(leftBottom, rightBottom) - y + padBottom
@@ -685,13 +738,14 @@ function drawVehicleState(doc: InstanceType<typeof PDFDocument>, x: number, y: n
 
     const legStartX = bx + 6
     const legStartY = diagramY + Math.max(4, (diagramH - 44) / 2)
-    const legItems = ['R - Rayure', 'B - Bosse', 'E - Éclat', 'C - Cassure']
+    const counts = countDamagesByType(block.damages)
     doc.font('Helvetica-Bold').fontSize(5).fillColor('#374151')
-    
-    // Vertical legend on the left
+
+    // Vertical legend on the left with counts
     let curY = legStartY
-    legItems.forEach((item) => {
-      doc.text(item, legStartX, curY, { lineBreak: false })
+    DAMAGE_LEGEND_ORDER.forEach((code) => {
+      const label = DAMAGE_LABELS[code]
+      doc.text(`${code} - ${label} ( ${counts[code]} )`, legStartX, curY, { lineBreak: false })
       curY += 12
     })
 
@@ -768,8 +822,8 @@ function drawDamageDiagramAnnex(
   ].forEach((block, index) => {
     if (index > 0) y += blockGap
     const blockH = Math.max(300, estimateDamageListHeight(block.damages) + 48)
-    if (y + blockH > PAGE.h - PAGE.m - FOOTER_H - 8) {
-      drawFooter(doc, x, PAGE.h - PAGE.m - FOOTER_H, CONTENT_W, settings)
+    if (y + blockH > PAGE.h - PAGE.m - footerHeight(settings) - 8) {
+      drawFooter(doc, x, PAGE.h - PAGE.m - footerHeight(settings), CONTENT_W, settings)
       doc.addPage({ size: 'A4', margin: 0 })
       y = PAGE.m
     }
@@ -780,7 +834,7 @@ function drawDamageDiagramAnnex(
     y += blockH
   })
 
-  drawFooter(doc, x, PAGE.h - PAGE.m - FOOTER_H, CONTENT_W, settings)
+  drawFooter(doc, x, PAGE.h - PAGE.m - footerHeight(settings), CONTENT_W, settings)
 }
 
 function collectDamagePhotos(contract: ContractRecord) {
@@ -818,8 +872,8 @@ function drawDamagePhotosAnnex(
 
   for (const block of blocks) {
     if (block.photos.length === 0) continue
-    if (y + 28 + PHOTO_CELL_H > PAGE.h - PAGE.m - FOOTER_H - 8) {
-      drawFooter(doc, x, PAGE.h - PAGE.m - FOOTER_H, CONTENT_W, settings)
+    if (y + 28 + PHOTO_CELL_H > PAGE.h - PAGE.m - footerHeight(settings) - 8) {
+      drawFooter(doc, x, PAGE.h - PAGE.m - footerHeight(settings), CONTENT_W, settings)
       doc.addPage({ size: 'A4', margin: 0 })
       y = PAGE.m
     }
@@ -831,7 +885,7 @@ function drawDamagePhotosAnnex(
     y += photoGridRows(block.photos.length) * PHOTO_CELL_H + 18
   }
 
-  drawFooter(doc, x, PAGE.h - PAGE.m - FOOTER_H, CONTENT_W, settings)
+  drawFooter(doc, x, PAGE.h - PAGE.m - footerHeight(settings), CONTENT_W, settings)
 }
 
 function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, contract: ContractRecord & { client_name?: string; paid_amount?: number }, breakdown: InvoiceBreakdown) {
@@ -842,18 +896,23 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
   const lines = breakdown.lines.length > 0 ? breakdown.lines : [{ label: 'Location', amount: qty * (contract.daily_rate ?? 0) }]
   const paidAmount = Math.max(0, Number(contract.paid_amount ?? 0))
   const remainingUnpaid = Math.max(0, Number(breakdown.total_ttc) - paidAmount)
-
-  // Columns: Désignation | Qté | P.U. HT | Montant HT | TVA % | Montant TVA | Total TTC
-  const c = [w * 0.34, w * 0.06, w * 0.12, w * 0.12, w * 0.08, w * 0.12, w * 0.16]
+  const dash = '—'
   const headH = 13
   const rowH = 12
 
+  // TVA YES: Désignation | Qté | P.U. HT | Montant HT | TVA | Montant TVA | Total TTC
+  // TVA NO:  Désignation | Qté | Prix unitaire | Montant | Total
+  const c = vatApplies
+    ? [w * 0.34, w * 0.06, w * 0.12, w * 0.12, w * 0.08, w * 0.12, w * 0.16]
+    : [w * 0.4, w * 0.1, w * 0.18, w * 0.16, w * 0.16]
+  const headers = vatApplies
+    ? ['Désignation', 'Qté', 'P.U. HT', 'Montant HT', 'TVA', 'Montant TVA', 'Total TTC']
+    : ['Désignation', 'Qté', 'Prix unitaire', 'Montant', 'Total']
+
   let cy = y
-  // Section bar
   sectionBar(doc, x, cy, w, 'Facture')
   cy += 14
 
-  // Info line
   doc.font('Helvetica-Bold').fontSize(6.5).fillColor('#111')
   doc.text(
     `N° facture : ${contract.contract_number}   |   Date : ${fmtDate(contract.contract_date || contract.start_date)}   |   Client : ${val(contract.driver1_name || contract.client_name)}`,
@@ -862,8 +921,6 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
   cy += 12
   doc.moveTo(x, cy).lineTo(x + w, cy).lineWidth(0.5).stroke('#222')
 
-  // Table header row (dark background)
-  const headers = ['Désignation', 'Qté', 'P.U. HT', 'Montant HT', 'TVA', 'Montant TVA', 'Total TTC']
   doc.rect(x, cy, w, headH).fill('#374151')
   let cx2 = x
   doc.font('Helvetica-Bold').fontSize(6.5).fillColor('#fff')
@@ -873,7 +930,6 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
   })
   cy += headH
 
-  // Table rows
   const tableStartY = cy
   doc.font('Helvetica').fontSize(6.5)
   const rowInfo = lines.map((line) => {
@@ -889,20 +945,30 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
     const amountHt = vatRate > 0 ? amountTtc / (1 + vatRate / 100) : amountTtc
     const amountVat = amountTtc - amountHt
     const { designation, lineDays, rowHeight } = rowInfo[index]
-    const puHt = lineDays > 0 ? money(amountHt / lineDays) : '—'
+    const unitPrice = vatApplies
+      ? (lineDays > 0 ? money(amountHt / lineDays) : dash)
+      : (lineDays > 0 ? money(amountTtc / lineDays) : dash)
 
     if (index % 2 === 0) doc.rect(x, cy, w, rowHeight).fill('#f8fafc')
     doc.moveTo(x, cy).lineTo(x + w, cy).lineWidth(0.3).stroke('#ddd')
 
-    const rowVals = [
-      designation,
-      lineDays > 0 ? String(lineDays) : '—',
-      puHt,
-      money(amountHt),
-      vatApplies ? `${vatRate} %` : '—',
-      vatApplies ? money(amountVat) : '—',
-      money(amountTtc),
-    ]
+    const rowVals = vatApplies
+      ? [
+          designation,
+          lineDays > 0 ? String(lineDays) : dash,
+          unitPrice,
+          money(amountHt),
+          `${vatRate} %`,
+          money(amountVat),
+          money(amountTtc),
+        ]
+      : [
+          designation,
+          lineDays > 0 ? String(lineDays) : dash,
+          unitPrice,
+          money(amountTtc),
+          money(amountTtc),
+        ]
 
     cx2 = x
     doc.font('Helvetica').fontSize(6.5).fillColor('#111')
@@ -913,7 +979,6 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
     cy += rowHeight
   })
 
-  // Table outer border + vertical column separators
   const tableH = headH + rowInfo.reduce((sum, r) => sum + r.rowHeight, 0)
   doc.rect(x, tableStartY - headH, w, tableH).lineWidth(0.5).stroke('#222')
   cx2 = x
@@ -926,24 +991,33 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
 
   cy += 4
 
-  // Summary block (right-aligned, full 4 rows)
-  const sW = c[3] + c[4] + c[5] + c[6]
+  const sW = vatApplies ? c[3] + c[4] + c[5] + c[6] : c[2] + c[3] + c[4]
   const sX = x + w - sW
   const sRowH = 11
+  const remainingLabel = remainingUnpaid > 0 ? money(remainingUnpaid) : 'Soldé'
+  const remainingColor = remainingUnpaid > 0 ? '#b45309' : '#16a34a'
 
-  const summaryRows: [string, string, string][] = [
-    ['Total HT', money(breakdown.total_ht), '#111'],
-    [`TVA (${vatApplies ? vatRate : 0} %)`, vatApplies ? money(breakdown.total_vat) : '—', '#111'],
-    ['Total TTC', money(breakdown.total_ttc), '#111'],
-    ['Montant payé', money(paidAmount), '#111'],
-    ['Reste impayé', remainingUnpaid > 0 ? money(remainingUnpaid) : 'Soldé', remainingUnpaid > 0 ? '#b45309' : '#16a34a'],
-  ]
+  const summaryRows: [string, string, string][] = vatApplies
+    ? [
+        ['Total HT', money(breakdown.total_ht), '#111'],
+        [`TVA (${vatRate} %)`, money(breakdown.total_vat), '#111'],
+        ['Total TTC', money(breakdown.total_ttc), '#111'],
+        ['Montant payé', money(paidAmount), '#111'],
+        ['Reste impayé', remainingLabel, remainingColor],
+      ]
+    : [
+        ['Total', money(breakdown.total_ttc), '#111'],
+        ['Montant payé', money(paidAmount), '#111'],
+        ['Reste impayé', remainingLabel, remainingColor],
+      ]
 
   const sLabelW = sW * 0.55
   const sValW = sW - sLabelW
+  const totalRowIndex = vatApplies ? 2 : 0
+  const unpaidRowIndex = summaryRows.length - 1
   summaryRows.forEach(([label, value, color], i) => {
-    const isBold = i === 2 || i === 4
-    const bgColor = i === 2 ? '#e5e7eb' : i % 2 === 0 ? '#f9fafb' : '#fff'
+    const isBold = i === totalRowIndex || i === unpaidRowIndex
+    const bgColor = i === totalRowIndex ? '#e5e7eb' : i % 2 === 0 ? '#f9fafb' : '#fff'
     doc.rect(sX, cy, sW, sRowH).fill(bgColor)
     doc.moveTo(sX, cy).lineTo(sX + sW, cy).lineWidth(0.3).stroke('#ccc')
     doc.moveTo(sX + sLabelW, cy).lineTo(sX + sLabelW, cy + sRowH).lineWidth(0.3).stroke('#ccc')
@@ -957,13 +1031,16 @@ function drawInvoice(doc: InstanceType<typeof PDFDocument>, x: number, y: number
 
   cy += 4
 
-  // Extras line
   doc.font('Helvetica').fontSize(6).fillColor('#555')
   const franchise = Number(contract.franchise_amount) > 0 ? money(contract.franchise_amount) : 'Non'
   const caution = money(contract.deposit_amount ?? contract.deposit ?? 0)
-  const tarifHt = money((contract.daily_rate ?? 0) / (vatRate > 0 ? 1 + vatRate / 100 : 1))
-  const tarifTtc = money(contract.daily_rate ?? 0)
-  doc.text(`Franchise : ${franchise}   |   Caution : ${caution}   |   Tarif/jour : ${tarifHt} HT / ${tarifTtc} TTC`, x + 4, cy, { width: w - 8, lineBreak: false })
+  const dailyRate = Number(contract.daily_rate ?? 0)
+  const tarifHt = money(dailyRate / (vatRate > 0 ? 1 + vatRate / 100 : 1))
+  const tarifTtc = money(dailyRate)
+  const tarifLine = vatApplies
+    ? `Franchise : ${franchise}   |   Caution : ${caution}   |   Tarif/jour : ${tarifHt} HT / ${tarifTtc} TTC`
+    : `Franchise : ${franchise}   |   Caution : ${caution}   |   Tarif/jour : ${tarifTtc}`
+  doc.text(tarifLine, x + 4, cy, { width: w - 8, lineBreak: false })
   cy += 10
 
   const totalH = cy - y
@@ -1055,14 +1132,28 @@ async function appendConditionsPdf(contractPdfPath: string, settings: Record<str
 }
 
 function drawFooter(doc: InstanceType<typeof PDFDocument>, x: number, y: number, w: number, settings: Record<string, string>) {
-  const legalText =
+  const legalFr =
     settings.legal_mention_fr?.trim() ||
     'Chaque dommage touche la société pendant la période de location ; le locataire sera exposé à la responsabilité administrative et judiciaire jusqu\'à la décision finale, ainsi qu\'au paiement de tous les frais résultants.'
+  const legalAr = settings.legal_mention_ar?.trim() || ''
+  const h = footerHeight(settings)
+  const hasArabic = Boolean(legalAr) && ensureArabicFont(doc)
 
-  strokeBox(doc, x, y, w, FOOTER_H)
+  strokeBox(doc, x, y, w, h)
 
   doc.font('Helvetica').fontSize(4.5).fillColor('#111')
-  doc.text(legalText, x + 6, y + 4, { width: w - 12, align: 'left', lineGap: 0, height: 16 })
+  doc.text(legalFr, x + 6, y + 3, { width: w - 12, align: 'left', lineGap: 0, height: hasArabic ? 12 : 16 })
+
+  if (hasArabic) {
+    const prepared = prepareArabicForPdf(legalAr)
+    doc.font(ARABIC_FONT_NAME).fontSize(5.5).fillColor('#111')
+    doc.text(prepared, x + 6, y + 14, {
+      width: w - 12,
+      align: 'right',
+      lineGap: 0,
+      height: 16,
+    })
+  }
 
   const ids = [
     ['RC', settings.company_rc],
@@ -1072,7 +1163,7 @@ function drawFooter(doc: InstanceType<typeof PDFDocument>, x: number, y: number,
     ['ICE', settings.company_ice],
   ] as const
 
-  const idsY = y + 22
+  const idsY = y + (hasArabic ? 32 : 22)
   const colW = w / ids.length
   ids.forEach(([label, value], index) => {
     const cx = x + index * colW
@@ -1103,7 +1194,7 @@ export function buildContractPdf(
     y += drawInvoice(doc, x, y, CONTENT_W, contract, breakdown) + SECTION_GAP
     drawSignatures(doc, x, y, CONTENT_W)
 
-    drawFooter(doc, x, PAGE.h - PAGE.m - FOOTER_H, CONTENT_W, settings)
+    drawFooter(doc, x, PAGE.h - PAGE.m - footerHeight(settings), CONTENT_W, settings)
     if (Number(contract.include_damage_photos_in_pdf) === 1) {
       drawDamagePhotosAnnex(doc, contract, settings)
     }

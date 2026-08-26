@@ -1334,7 +1334,7 @@ export function createContractsApi(helpers: DbHelpers, carsApi: CarsApi, getSett
         car_id: Number(reservation.car_id),
         status: 'active',
         contract_date: new Date().toISOString().slice(0, 10),
-        contract_city: settings.company_city ?? settings.company_address ?? '',
+        contract_city: settings.company_city ?? '',
         departure_at: String(reservation.pickup_date),
         return_at: String(reservation.return_date),
         departure_place: departurePlaceFromDeliveryLocation(reservation.delivery_location),
