@@ -10,6 +10,7 @@ import {
   getDefaultDamagePosition,
 } from '../utils/contracts'
 import { CarDamageDiagram } from './CarDamageDiagram'
+import { NationalitiesDatalist } from './NationalitiesDatalist'
 
 function DamagePhotoPreview({ path }: { path: string }) {
   const [url, setUrl] = useState('')
@@ -340,7 +341,14 @@ export function DriverFields({ prefix, form, setForm, t, required = false, onCop
           </div>
           <div className="field">
             <label>{t.nationality}</label>
-            <input className="input" value={String(form[field('nationality')] ?? '')} onChange={(e) => setValue('nationality', e.target.value)} />
+            <input
+              className="input"
+              list="contract-driver-nationalities"
+              value={String(form[field('nationality')] ?? '')}
+              onChange={(e) => setValue('nationality', e.target.value)}
+              placeholder="ex: Marocaine"
+            />
+            <NationalitiesDatalist id="contract-driver-nationalities" />
           </div>
           <div className="field">
             <label>{t.address}</label>

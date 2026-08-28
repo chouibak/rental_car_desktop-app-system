@@ -24,6 +24,89 @@ function buildConicGradient(segments: Segment[]) {
   return `conic-gradient(${stops.join(', ')})`
 }
 
+export function FleetStatusOverview({
+  available,
+  rented,
+  maintenance,
+  utilizationPct,
+}: {
+  available: number
+  rented: number
+  maintenance: number
+  utilizationPct: number
+}) {
+  const { t } = useLang()
+  const total = available + rented + maintenance
+  const clampedUtilization = Math.max(0, Math.min(100, utilizationPct))
+
+  const segments: Segment[] = [
+    { key: 'available', value: available, color: '#10b981', labelKey: 'availableCars' },
+    { key: 'rented', value: rented, color: '#3b82f6', labelKey: 'rentedCars' },
+    { key: 'maintenance', value: maintenance, color: '#f59e0b', labelKey: 'horsServiceCars' },
+  ]
+
+  return (
+    <div className="fleet-status-overview">
+      <div className="fleet-status-main">
+        <div
+          className="fleet-status-donut-box"
+          style={{ background: buildConicGradient(segments) }}
+        >
+          <div className="fleet-status-donut-hole">
+            <strong>{total}</strong>
+            <span>{t.totalCars}</span>
+          </div>
+        </div>
+
+        <div className="fleet-status-legend">
+          {segments.map((segment) => {
+            const pct = total > 0 ? Math.round((segment.value / total) * 100) : 0
+            return (
+              <div className="fleet-status-item" key={segment.key}>
+                <div className="fleet-status-item-meta">
+                  <span className="fleet-status-item-label">
+                    <i className="fleet-status-item-dot" style={{ background: segment.color }} />
+                    {t[segment.labelKey]}
+                  </span>
+                  <div className="fleet-status-item-vals">
+                    <span className="fleet-status-item-count">{segment.value}</span>
+                    <span className="fleet-status-item-pct">{total ? `${pct}%` : '0%'}</span>
+                  </div>
+                </div>
+                <div className="fleet-status-item-bar">
+                  <div
+                    className="fleet-status-item-bar-fill"
+                    style={{
+                      width: `${total ? pct : 0}%`,
+                      background: segment.color,
+                    }}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="fleet-utilization-card">
+        <div className="fleet-utilization-card-header">
+          <div className="fleet-utilization-card-info">
+            <h4>{t.fleetUtilization}</h4>
+            <p>{t.fleetUtilizationHint}</p>
+          </div>
+          <span className="fleet-utilization-badge">{clampedUtilization}%</span>
+        </div>
+        <div className="fleet-utilization-bar">
+          <div
+            className="fleet-utilization-bar-fill"
+            style={{ width: `${clampedUtilization}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function FleetStatusDonut({
   available,
   rented,
@@ -36,8 +119,8 @@ export function FleetStatusDonut({
   const { t } = useLang()
   const total = available + rented + maintenance
   const segments: Segment[] = [
-    { key: 'available', value: available, color: '#22c55e', labelKey: 'availableCars' },
-    { key: 'rented', value: rented, color: 'var(--rented)', labelKey: 'rentedCars' },
+    { key: 'available', value: available, color: '#10b981', labelKey: 'availableCars' },
+    { key: 'rented', value: rented, color: '#3b82f6', labelKey: 'rentedCars' },
     { key: 'maintenance', value: maintenance, color: '#f59e0b', labelKey: 'horsServiceCars' },
   ]
 

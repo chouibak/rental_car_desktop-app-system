@@ -57,7 +57,13 @@ export function LicenseGate({ children }: Props) {
         setStatus(result.status)
         setKey('')
       } else {
-        setError(result.error === 'INVALID_KEY' ? t.licenseInvalidKey : t.licenseError)
+        if (result.error === 'INVALID_KEY') {
+          setError(t.licenseInvalidKey)
+        } else if (result.error === 'KEY_ALREADY_USED') {
+          setError(t.licenseKeyAlreadyUsed)
+        } else {
+          setError(t.licenseError)
+        }
       }
     } catch {
       setError(t.licenseError)

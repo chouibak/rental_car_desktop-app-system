@@ -422,6 +422,7 @@ export default function SettingsPage() {
       } else {
         const messages: Record<string, string> = {
           INVALID_KEY: t.licenseInvalidKey,
+          KEY_ALREADY_USED: t.licenseKeyAlreadyUsed,
           LIFETIME_ACTIVE: t.licenseLifetimeActive,
         }
         setLicenseError(messages[result.error] || t.licenseError)

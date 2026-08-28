@@ -236,6 +236,28 @@ export function IconEyeOff(props: IconProps) {
   )
 }
 
+export function IconIdCard(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="9" cy="10" r="2" />
+      <path d="M15 8h2" />
+      <path d="M15 12h2" />
+      <path d="M7 16h10" />
+    </Icon>
+  )
+}
+
+export function IconLogout(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </Icon>
+  )
+}
+
 export function IconWhatsApp({ size = 18, className = '' }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>

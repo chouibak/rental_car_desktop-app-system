@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/ui'
+import { NationalitiesDatalist } from '../components/NationalitiesDatalist'
 import { useLang } from '../context/LangContext'
 import { fileBasename } from '../utils/file'
 import { mapAppError } from '../utils/errors'
@@ -222,9 +223,12 @@ export default function CustomerFormPage() {
               <label>{t.nationality}</label>
               <input
                 className="input"
+                list="customer-nationalities"
                 value={form.nationality || ''}
                 onChange={(e) => setForm((f) => ({ ...f, nationality: e.target.value }))}
+                placeholder="ex: Marocaine"
               />
+              <NationalitiesDatalist id="customer-nationalities" />
             </div>
             <div className="field full">
               <label>{t.address}</label>

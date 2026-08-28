@@ -4,5 +4,6 @@ dist
 dist-electron
 release/*
 !release/LocAgencePro-Setup-*.exe
+release-out/
 *.log
 .DS_Store

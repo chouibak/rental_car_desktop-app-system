@@ -1,5 +1,6 @@
 import './gpu-fix'
 import { app, BrowserWindow, dialog, ipcMain, net, protocol } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
 import { serveAppFileRequest } from './storage'
 import { initDb, getDbApi } from './db'
@@ -100,13 +101,19 @@ function resolveWindowIcon() {
   return path.join(__dirname, '../build/icon.ico')
 }
 
-async function waitForDevServer(url: string, attempts = 40, delayMs = 250) {
+async function waitForDevServer(url: string, attempts = 80, delayMs = 500) {
+  const urlsToTry = [url]
+  if (url.includes('localhost')) {
+    urlsToTry.push(url.replace('localhost', '127.0.0.1'))
+  }
   for (let i = 0; i < attempts; i++) {
-    try {
-      const response = await net.fetch(url, { method: 'GET' })
-      if (response.ok || response.status === 304) return
-    } catch {
-      // Vite not ready yet
+    for (const testUrl of urlsToTry) {
+      try {
+        const response = await net.fetch(testUrl, { method: 'GET' })
+        if (response.ok || response.status === 304 || response.status === 200) return
+      } catch {
+        // Vite not ready yet
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, delayMs))
   }
@@ -115,21 +122,27 @@ async function waitForDevServer(url: string, attempts = 40, delayMs = 250) {
 
 async function loadRenderer(win: BrowserWindow) {
   if (VITE_DEV_SERVER_URL) {
-    await waitForDevServer(VITE_DEV_SERVER_URL)
-    let lastError: unknown
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        await win.loadURL(VITE_DEV_SERVER_URL)
-        return
-      } catch (error) {
-        lastError = error
-        await new Promise((resolve) => setTimeout(resolve, 400))
+    try {
+      await waitForDevServer(VITE_DEV_SERVER_URL)
+      for (let attempt = 0; attempt < 8; attempt++) {
+        try {
+          await win.loadURL(VITE_DEV_SERVER_URL)
+          return
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 500))
+        }
       }
+    } catch {
+      // If dev server timed out, fall back to dist/index.html if present
     }
-    throw lastError instanceof Error ? lastError : new Error(String(lastError))
   }
 
-  await win.loadFile(path.join(process.env.DIST!, 'index.html'))
+  const distIndex = path.join(process.env.DIST || path.join(__dirname, '../dist'), 'index.html')
+  if (fs.existsSync(distIndex)) {
+    await win.loadFile(distIndex)
+    return
+  }
+  throw new Error(`Dev server unavailable: ${VITE_DEV_SERVER_URL || 'http://localhost:5173/'}`)
 }
 
 async function createWindow() {

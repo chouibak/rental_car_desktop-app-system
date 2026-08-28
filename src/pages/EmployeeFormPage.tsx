@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/ui'
+import { NationalitiesDatalist } from '../components/NationalitiesDatalist'
 import { useLang } from '../context/LangContext'
 import type { Dict } from '../i18n'
 import type { Employee, EmployeeRole } from '../types'
@@ -155,9 +156,12 @@ export default function EmployeeFormPage() {
                 <label>{t.nationality}</label>
                 <input
                   className="input"
+                  list="employee-nationalities"
                   value={form.nationality ?? ''}
                   onChange={(e) => setForm({ ...form, nationality: e.target.value })}
+                  placeholder="ex: Marocaine"
                 />
+                <NationalitiesDatalist id="employee-nationalities" />
               </div>
               <div className="field">
                 <label>{t.address}</label>

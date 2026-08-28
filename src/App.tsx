@@ -9,6 +9,8 @@ import {
   IconFile,
   IconCalendar,
   IconChart,
+  IconIdCard,
+  IconLogout,
   IconPanelLeft,
   IconReceipt,
   IconSettings,
@@ -51,7 +53,7 @@ const navIcons = {
   '/cars': IconCar,
   '/customers': IconUsers,
   '/chauffeurs': IconSteering,
-  '/employees': IconUsers,
+  '/employees': IconIdCard,
   '/reservations': IconCalendar,
   '/contracts': IconFile,
   '/payments': IconWallet,
@@ -144,18 +146,27 @@ export default function App() {
             const Icon = navIcons[l.to as keyof typeof navIcons]
             return (
               <NavLink key={l.to} to={l.to} end={l.to === '/'} className={({ isActive }) => (isActive ? 'active' : '')}>
-                <Icon size={18} />
-                {l.label}
+                <Icon size={19} />
+                <span>{l.label}</span>
               </NavLink>
             )
           })}
         </nav>
 
         <div className="sidebar-footer">
-          <div className="sidebar-session">
-            <p className="sidebar-user">{t.authLoggedInAs.replace('{user}', username)}</p>
-            <button type="button" className="sidebar-logout" onClick={() => logout()}>
-              {t.authLogout}
+          <div className="sidebar-user-card">
+            <div className="sidebar-user-details">
+              <span className="sidebar-user-role">{t.authLoggedInAs.replace('{user}', '')}</span>
+              <span className="sidebar-user-name">{username}</span>
+            </div>
+            <button
+              type="button"
+              className="sidebar-logout-btn"
+              onClick={() => logout()}
+              title={t.authLogout}
+              aria-label={t.authLogout}
+            >
+              <IconLogout size={16} />
             </button>
           </div>
           <div className="lang-switch">
@@ -177,7 +188,7 @@ export default function App() {
                 window.api.saveSettings({ language: 'ar' }).catch(() => undefined)
               }}
             >
-              ع
+              عربية
             </button>
           </div>
         </div>

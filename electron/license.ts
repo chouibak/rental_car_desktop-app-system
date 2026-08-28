@@ -21,6 +21,8 @@ type StoredLicense = {
   type: LicenseType | 'trial'
   activatedAt: string
   expiresAt: string | null
+  activeKeyHash?: string
+  usedKeyHashes?: string[]
   signature: string
 }
 
@@ -30,10 +32,23 @@ const TRIAL_MS: Record<'trial_7d' | 'trial_5min', number> = {
 }
 
 /** SHA-256 hashes of valid keys — plain keys never stored in source. */
-const KEY_HASHES: Record<LicenseType, string> = {
-  trial_7d: '0c971d968c7cb15694ca5758933903bd46e5b1abe2a671ff555f6f17d872721d',
-  trial_5min: 'cdaa62a68cebea66f3c486260cee21730db10b6709f0927236aa4aeda6175ac8',
-  lifetime: '9c88fe92f27cf54845a19b177c756c18342a9b63c854c81db892ccd653d7a19d',
+const KEY_HASHES: Record<LicenseType, string[]> = {
+  trial_7d: [
+    '6a0ee89b146acaa6eb0a557f47e0c0aab4280423808a32ec7f4ad862f71df1ac',
+    '6622aef0440bf4608541d8e0fb8d48a9bfe86c1155f6c39b2b422c4e9e0a3899',
+    '54b85fa8a1c172a26a0db22910ec25c76701b333c9729587d28bddc996c389bc',
+    'b7d13bdeb3cf3c8399b3ed432f23403459b393ecd16c821dcc578787a29f8483',
+    '86cbb6f445bd848688d9559a08a1de339068372542dd56dc75f3d9db4d822db1',
+    '0c971d968c7cb15694ca5758933903bd46e5b1abe2a671ff555f6f17d872721d',
+  ],
+  trial_5min: [
+    'cdaa62a68cebea66f3c486260cee21730db10b6709f0927236aa4aeda6175ac8',
+  ],
+  lifetime: [
+    'd8a0cb4c47ed83255b82224e6ac56a9c9d5b5b0e69345220a2b6ce46b32339f9',
+    'a08bb07dcc6743d11b732557f23560ad811e1d9933d51859866e94c55d8ce007',
+    '9c88fe92f27cf54845a19b177c756c18342a9b63c854c81db892ccd653d7a19d',
+  ],
 }
 
 const SIGN_SECRET = 'RCRM-LIC-v1|chouibak|rental-car-crm|2026'
@@ -45,7 +60,7 @@ export function initLicense(userDataPath: string) {
 }
 
 function normalizeKey(raw: string) {
-  return raw.trim().toUpperCase().replace(/\s+/g, '')
+  return raw.trim().toUpperCase().replace(/[\s-]+/g, '')
 }
 
 function hashKey(key: string) {
@@ -54,9 +69,9 @@ function hashKey(key: string) {
 
 function matchKeyType(key: string): LicenseType | null {
   const hash = hashKey(key)
-  if (hash === KEY_HASHES.trial_7d) return 'trial_7d'
-  if (hash === KEY_HASHES.trial_5min) return 'trial_5min'
-  if (hash === KEY_HASHES.lifetime) return 'lifetime'
+  if (KEY_HASHES.trial_7d.includes(hash)) return 'trial_7d'
+  if (KEY_HASHES.trial_5min.includes(hash)) return 'trial_5min'
+  if (KEY_HASHES.lifetime.includes(hash)) return 'lifetime'
   return null
 }
 
@@ -65,16 +80,36 @@ function normalizeStoredType(type: StoredLicense['type']): LicenseType {
   return type
 }
 
-function signPayload(type: LicenseType, activatedAt: string, expiresAt: string | null) {
-  const payload = `${type}|${activatedAt}|${expiresAt ?? ''}`
+function signPayload(
+  type: LicenseType,
+  activatedAt: string,
+  expiresAt: string | null,
+  activeKeyHash: string = '',
+  usedKeyHashes: string[] = []
+) {
+  const sortedUsed = [...usedKeyHashes].sort().join(',')
+  const payload = `${type}|${activatedAt}|${expiresAt ?? ''}|${activeKeyHash}|${sortedUsed}`
   return crypto.createHmac('sha256', SIGN_SECRET).update(payload).digest('hex')
 }
 
 function verifyStoredLicense(data: StoredLicense): boolean {
   const type = normalizeStoredType(data.type)
-  const expected = signPayload(type, data.activatedAt, data.expiresAt)
+  const active = data.activeKeyHash ?? ''
+  const used = data.usedKeyHashes ?? []
+
+  // Check new signature format
+  const expectedNew = signPayload(type, data.activatedAt, data.expiresAt, active, used)
   try {
-    return crypto.timingSafeEqual(Buffer.from(data.signature, 'hex'), Buffer.from(expected, 'hex'))
+    if (crypto.timingSafeEqual(Buffer.from(data.signature, 'hex'), Buffer.from(expectedNew, 'hex'))) {
+      return true
+    }
+  } catch {}
+
+  // Fallback check legacy signature format
+  const legacyPayload = `${type}|${data.activatedAt}|${data.expiresAt ?? ''}`
+  const expectedLegacy = crypto.createHmac('sha256', SIGN_SECRET).update(legacyPayload).digest('hex')
+  try {
+    return crypto.timingSafeEqual(Buffer.from(data.signature, 'hex'), Buffer.from(expectedLegacy, 'hex'))
   } catch {
     return false
   }
@@ -92,14 +127,21 @@ function readStoredLicense(): (StoredLicense & { type: LicenseType }) | null {
   }
 }
 
-function writeStoredLicense(type: LicenseType) {
+function writeStoredLicense(type: LicenseType, activeKeyHash: string, usedKeyHashes: string[]) {
   const activatedAt = new Date().toISOString()
   const expiresAt =
     type === 'lifetime'
       ? null
       : new Date(Date.now() + TRIAL_MS[type]).toISOString()
-  const signature = signPayload(type, activatedAt, expiresAt)
-  const payload: StoredLicense = { type, activatedAt, expiresAt, signature }
+  const signature = signPayload(type, activatedAt, expiresAt, activeKeyHash, usedKeyHashes)
+  const payload: StoredLicense = {
+    type,
+    activatedAt,
+    expiresAt,
+    activeKeyHash,
+    usedKeyHashes,
+    signature,
+  }
   writeJsonFileAtomic(licenseFilePath, payload)
 }
 
@@ -169,15 +211,25 @@ export function activateLicense(rawKey: string): { ok: true; status: LicenseStat
   const key = normalizeKey(rawKey)
   if (!key) return { ok: false, error: 'INVALID_KEY' }
 
+  const hash = hashKey(key)
   const type = matchKeyType(key)
   if (!type) return { ok: false, error: 'INVALID_KEY' }
+
+  const stored = readStoredLicense()
+  const usedList = stored?.usedKeyHashes ?? (stored?.activeKeyHash ? [stored.activeKeyHash] : [])
+  const usedSet = new Set(usedList)
+
+  if (usedSet.has(hash)) {
+    return { ok: false, error: 'KEY_ALREADY_USED' }
+  }
 
   const current = getLicenseStatus()
   if (current.type === 'lifetime' && type !== 'lifetime') {
     return { ok: false, error: 'LIFETIME_ACTIVE' }
   }
 
-  writeStoredLicense(type)
+  usedSet.add(hash)
+  writeStoredLicense(type, hash, Array.from(usedSet))
   return { ok: true, status: getLicenseStatus() }
 }
 

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  FleetStatusDonut,
-  FleetUtilizationGauge,
+  FleetStatusOverview,
   TopCarsUsageChart,
 } from '../components/DashboardCharts'
 import { RevenueNetChart, RevenueTrendChart } from '../components/RevenueCharts'
@@ -52,77 +51,79 @@ export default function DashboardPage() {
         <StatCard label={t.monthRevenue} value={money(stats.monthRevenue)} tone="success" />
       </div>
 
-      <div className="panel">
-        <div className="panel-header">
-          <div>
-            <h3>{t.carsInUse}</h3>
-            <p className="muted-text">{t.carsInUseHint}</p>
+      <div className="dashboard-grid">
+        <div className="panel dashboard-panel">
+          <div className="panel-header">
+            <div>
+              <h3>{t.carsInUse}</h3>
+              <p className="muted-text">{t.carsInUseHint}</p>
+            </div>
+            <Link className="btn secondary btn-sm" to="/cars">
+              {t.cars}
+            </Link>
           </div>
-          <Link className="btn secondary btn-sm" to="/cars">
-            {t.cars}
-          </Link>
-        </div>
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t.car}</th>
-                <th>{t.client}</th>
-                <th>{t.contractNumber}</th>
-                <th>{t.returnAt}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {charts.cars_in_use.length === 0 && (
+          <div className="table-wrap dashboard-table-wrap">
+            <table className="data-table dashboard-table">
+              <thead>
                 <tr>
-                  <td colSpan={4} className="empty">
-                    {t.noCarsInUse}
-                  </td>
+                  <th>{t.car}</th>
+                  <th>{t.client}</th>
+                  <th>{t.contractNumber}</th>
+                  <th>{t.returnAt}</th>
                 </tr>
-              )}
-              {charts.cars_in_use.map((row) => (
-                <tr key={row.car_id} className="clickable-row">
-                  <td>
-                    <Link className="link-btn" to={`/cars/${row.car_id}`}>
-                      {row.car_name}
-                    </Link>
-                    <div className="muted-text">{row.plate_number}</div>
-                  </td>
-                  <td>{row.client_name}</td>
-                  <td>
-                    {row.contract_id ? (
-                      <Link to={`/contracts/${row.contract_id}`}>
-                        {row.contract_number}
-                        {row.contract_status === 'draft' && (
-                          <span className="muted-text"> ({t.draft})</span>
-                        )}
+              </thead>
+              <tbody>
+                {charts.cars_in_use.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="empty">
+                      {t.noCarsInUse}
+                    </td>
+                  </tr>
+                )}
+                {charts.cars_in_use.map((row) => (
+                  <tr key={row.car_id} className="clickable-row">
+                    <td>
+                      <Link className="link-btn" to={`/cars/${row.car_id}`}>
+                        {row.car_name}
                       </Link>
-                    ) : row.reservation_id ? (
-                      <Link to={`/reservations/${row.reservation_id}`}>{row.reservation_reference}</Link>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td>{formatContractDatetime(row.return_at)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="panel dashboard-panel">
-        <div className="panel-header">
-          <div>
-            <h3>{t.topCarsUsage}</h3>
-            <p className="muted-text">{t.topCarsUsageHint}</p>
+                      <div className="muted-text">{row.plate_number}</div>
+                    </td>
+                    <td>{row.client_name}</td>
+                    <td>
+                      {row.contract_id ? (
+                        <Link to={`/contracts/${row.contract_id}`}>
+                          {row.contract_number}
+                          {row.contract_status === 'draft' && (
+                            <span className="muted-text"> ({t.draft})</span>
+                          )}
+                        </Link>
+                      ) : row.reservation_id ? (
+                        <Link to={`/reservations/${row.reservation_id}`}>{row.reservation_reference}</Link>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td>{formatContractDatetime(row.return_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          <Link className="btn secondary btn-sm" to="/cars">
-            {t.cars}
-          </Link>
         </div>
-        <div className="panel-body">
-          <TopCarsUsageChart cars={charts.top_cars_usage} />
+
+        <div className="panel dashboard-panel">
+          <div className="panel-header">
+            <div>
+              <h3>{t.topCarsUsage}</h3>
+              <p className="muted-text">{t.topCarsUsageHint}</p>
+            </div>
+            <Link className="btn secondary btn-sm" to="/cars">
+              {t.cars}
+            </Link>
+          </div>
+          <div className="panel-body">
+            <TopCarsUsageChart cars={charts.top_cars_usage} />
+          </div>
         </div>
       </div>
 
@@ -145,16 +146,12 @@ export default function DashboardPage() {
         <div className="panel dashboard-panel">
           <div className="panel-header">
             <div>
-              <h3>{t.fleetStatus}</h3>
-              <p className="muted-text">{t.fleetStatusHint}</p>
+              <h3>{t.netTrend}</h3>
+              <p className="muted-text">{t.dashboardNetHint}</p>
             </div>
-            <Link className="btn secondary btn-sm" to="/cars">
-              {t.cars}
-            </Link>
           </div>
-          <div className="panel-body dashboard-fleet-panel">
-            <FleetUtilizationGauge percent={charts.fleet_utilization_pct} />
-            <FleetStatusDonut available={stats.available} rented={stats.rented} maintenance={stats.maintenance} />
+          <div className="panel-body">
+            <RevenueNetChart data={charts.monthly_trend} />
           </div>
         </div>
       </div>
@@ -163,12 +160,20 @@ export default function DashboardPage() {
         <div className="panel dashboard-panel">
           <div className="panel-header">
             <div>
-              <h3>{t.netTrend}</h3>
-              <p className="muted-text">{t.dashboardNetHint}</p>
+              <h3>{t.fleetStatus}</h3>
+              <p className="muted-text">{t.fleetStatusHint}</p>
             </div>
+            <Link className="btn secondary btn-sm" to="/cars">
+              {t.cars}
+            </Link>
           </div>
           <div className="panel-body">
-            <RevenueNetChart data={charts.monthly_trend} />
+            <FleetStatusOverview
+              available={stats.available}
+              rented={stats.rented}
+              maintenance={stats.maintenance}
+              utilizationPct={charts.fleet_utilization_pct}
+            />
           </div>
         </div>
 
